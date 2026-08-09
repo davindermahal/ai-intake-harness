@@ -1,0 +1,101 @@
+# permissions.yaml
+#
+# Classification of the knowledge extracted from ai-intake-harness/, for downstream
+# documentation/publishing decisions.
+#
+# Levels:
+#   PUBLIC       — safe to publish as-is.
+#   INTERNAL     — may be summarized; do not publish verbatim internals.
+#   CONFIDENTIAL — never publish.
+#   SECRET       — ignore completely (credentials/keys); not reproduced anywhere in these docs.
+#
+# When uncertain, items are classified conservatively (toward more restriction).
+
+classification:
+
+  PUBLIC:
+    - id: concept-and-purpose
+      what: >
+        What the harness is and the problem it solves — ticket → plan → approval →
+        worktree → build/verify → report, with human gates and a build-and-verify-only boundary.
+      where: [overview.md, faq.md]
+    - id: high-level-architecture
+      what: >
+        The three-layer design (generic core + tracker/project/AI adapter seams), the
+        abstract state machine, the abstract queues, and the general data-flow shape.
+      where: [architecture.md, README.md]
+    - id: design-rationale
+      what: >
+        The reasoning behind the major decisions (full-REST, plan-file seam, human approval
+        gate, automation boundary, isolation, watchdog, adapters). Rationale, not internals.
+      where: [design-decisions.md]
+    - id: glossary
+      what: Vendor-neutral terminology definitions.
+      where: [glossary.md]
+    - id: integrator-contracts
+      what: >
+        The adapter contracts and the "how to add it to a project" steps, as already published
+        in the project README for consumers.
+      where: [README.md]
+    - id: generic-lessons
+      what: >
+        Non-sensitive engineering lessons (watchdog need, grace period, stderr-only logging,
+        env-parsing robustness, scheme-less-host normalization) at a conceptual level.
+      where: [lessons-learned.md]
+
+  INTERNAL:
+    - id: precise-runtime-protocol
+      what: >
+        Exact file-based coordination protocol (specific state-dir file names, decision JSON
+        shape, running-slot/attempts record formats, staleness/grace timeouts). Summarize;
+        avoid publishing as a copy-paste integration spec.
+      reason: Operational detail useful to a contributor but not needed by a general audience.
+    - id: watchdog-stall-taxonomy
+      what: The specific restart-vs-escalate decision logic and retry-budget mechanics.
+      reason: Internal algorithm; summarize behavior, not the branching detail.
+    - id: default-config-values
+      what: >
+        Default ports, concurrency caps, timeout constants, database-name prefixes, and
+        similar tuning defaults.
+      reason: Environment-specific; fine internally, noise (or misleading) if published broadly.
+    - id: provider-status-notes
+      what: >
+        That one provider is a stub and the local-LLM path is unverified end-to-end — accurate
+        internal status worth stating plainly to contributors.
+      reason: Candid maturity status; keep factual and internal-leaning.
+    - id: consumer-integration-lessons
+      what: >
+        Lessons that arose in the first consumer project (path/rename breakage of host-only glue,
+        worktree/DB resolution mishap).
+      reason: Tied to a specific consumer's operational history; summarize, don't attribute detail.
+
+  CONFIDENTIAL:
+    - id: tracker-instance-identity
+      what: >
+        The specific hosted-tracker site URL / account email appearing in code comments and
+        examples (an identifiable private instance and personal address).
+      reason: Identifies a private instance and an individual; never publish. Use placeholders.
+    - id: private-network-endpoints
+      what: >
+        The author's private-LAN address/port used as the default local-LLM base URL, and any
+        other host-specific endpoints.
+      reason: Private infrastructure detail; never publish.
+    - id: permission-profile-specifics
+      what: >
+        The exact allow/deny entries of the unattended-worker permission profiles, insofar as
+        they reveal a specific project's internal command surface.
+      reason: Reveals internal tooling/command layout; describe the intent, not the full list.
+
+  SECRET:
+    - id: credentials
+      what: >
+        The tracker API token, any API keys, database passwords, and similar secrets. These are
+        read from gitignored env files at runtime and are NOT reproduced in any of these docs.
+      reason: Secrets — ignore entirely. Never extract, never publish.
+
+notes:
+  - These knowledge-base docs (overview/architecture/glossary/design-decisions/lessons-learned/faq)
+    were written to stay at or above the INTERNAL line: no credentials, and identifiable
+    instance/host details are referred to generically rather than quoted.
+  - Before any public release, scrub the source's own inline example values (tracker site URL,
+    account email, private-LAN base URL) and replace with placeholders.
