@@ -1,0 +1,39 @@
+# .ai/ orientation
+
+**ai-intake-harness** is a tracker- and project-agnostic automation harness that turns issue-tracker
+tickets into AI-authored plans and AI-implemented code changes, with human approval gates in
+between: **ticket → plan → (human approval) → isolated worktree → build/verify → report back**. A
+background poller drives it; a generic core engine knows nothing about the specific tracker,
+project stack, or AI backend — those are supplied via three adapter seams. See
+`README.md` at the repo root for the adapter contracts and integration quickstart.
+
+This repo *is* the harness itself (the tool), not a project that consumes it. Its own docs/
+directory (see below) is unusually complete — read it before asking questions the docs already
+answer.
+
+## Read order
+
+1. **This file** — orientation.
+2. [`system.md`](system.md) — what this project is, core concepts/glossary, core principles.
+3. [`repo-map.md`](repo-map.md) — directory-by-directory map of the codebase.
+4. `../README.md` (repo root) — the full adapter contracts, quickstart for vendoring the harness
+   into a consumer project, and the runtime state directory layout.
+5. `../docs/` — deep-dive docs, already comprehensive:
+   - `overview.md` — what it is, the problem it solves, who it's for.
+   - `architecture.md` — component picture, data flow, external systems.
+   - `workflow-and-triggers.md` — the operator's runbook: exactly what you do (ticket status
+     changes) to drive each stage, plus manual/observe commands.
+   - `design-decisions.md` — numbered decisions with rationale and trade-offs.
+   - `glossary.md` — terminology.
+   - `faq.md` — common questions.
+   - `lessons-learned.md` — hard-won fixes and open caveats.
+   - `permissions.yaml` — publish-classification (PUBLIC/INTERNAL/CONFIDENTIAL/SECRET) of the
+     content extracted into these docs.
+   - `article.md` / `versions/` — a blog-post writeup derived from this project; not
+     authoritative for how the code works.
+
+## Plans convention
+
+New plans for work on this repo (the harness itself) go in `.ai/plans/active/`. Once implemented,
+move the file to `.ai/plans/completed/` — files there are never edited again, only superseded by a
+new plan.
