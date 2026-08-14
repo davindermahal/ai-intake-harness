@@ -44,3 +44,9 @@ Three stages, each its own directory:
   new plan.
 
 Move the file between directories as it progresses; don't duplicate it.
+
+## `.ai/aos-extracts/`
+
+Scoped write-ups produced by the `extract-for-aos` skill (`/extract-for-aos`), meant to be fed
+into a separate author-operating-system repo for article drafting. A byproduct of writing about
+this project, not part of its documentation — see `repo-map.md` for details.
