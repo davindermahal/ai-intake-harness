@@ -34,6 +34,13 @@ answer.
 
 ## Plans convention
 
-New plans for work on this repo (the harness itself) go in `.ai/plans/active/`. Once implemented,
-move the file to `.ai/plans/completed/` — files there are never edited again, only superseded by a
-new plan.
+Three stages, each its own directory:
+
+- **`.ai/plans/draft/`** — an idea or brainstorming session captured before it's fleshed into
+  concrete implementation steps. Not forced to completeness just to have somewhere to put it; open
+  questions are expected here.
+- **`.ai/plans/active/`** — a fleshed-out plan, ready to implement or being implemented.
+- **`.ai/plans/completed/`** — finished. Files here are never edited again, only superseded by a
+  new plan.
+
+Move the file between directories as it progresses; don't duplicate it.

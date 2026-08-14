@@ -8,5 +8,6 @@ built so it can never perform the `Plan Review → Ready for Implementation` tra
 unattended workers may only build/test/verify — never push, merge, or deploy. Any change to this
 repo's own code must preserve that boundary; see `docs/design-decisions.md` #4 and #5.
 
-Plans: create new plans in `.ai/plans/active/`. Once implemented, move to
+Plans: capture a new idea or brainstorming session in `.ai/plans/draft/`. Once fleshed into
+concrete implementation steps, move it to `.ai/plans/active/`. Once implemented, move to
 `.ai/plans/completed/` — files there must never be edited afterward.

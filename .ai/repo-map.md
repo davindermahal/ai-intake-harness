@@ -89,5 +89,6 @@ that vendors this harness in — gitignored there, not part of this harness's ow
 ## This repo's own `.ai/`
 
 Distinct from the consumer-repo `.ai/` described above: this directory is this harness project's
-*own* AI-context layer (this file set) plus its own `plans/active/` and `plans/completed/` for
-tracking development work on the harness itself.
+*own* AI-context layer (this file set) plus its own `plans/draft/`, `plans/active/`, and
+`plans/completed/` for tracking development work on the harness itself — see
+[`README.md`](README.md#plans-convention) for the three-stage convention.
