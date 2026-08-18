@@ -45,8 +45,11 @@ Three stages, each its own directory:
 
 Move the file between directories as it progresses; don't duplicate it.
 
-## `.ai/aos-extracts/`
+## `.ai/docs/extracted/`
 
-Scoped write-ups produced by the `extract-for-aos` skill (`/extract-for-aos`), meant to be fed
-into a separate author-operating-system repo for article drafting. A byproduct of writing about
-this project, not part of its documentation — see `repo-map.md` for details.
+A generic drop point for scoped writeups extracted from this project for use outside it (e.g. for
+article drafting) — not tied to any one extraction tool, so anyone can add to it even without
+access to the specific skill that produced an existing file. Currently populated by the
+`extract-for-aos` skill (`/extract-for-aos`, `aos-extract-*.md` files, fed into a separate
+author-operating-system repo). A byproduct of writing about this project, not part of its own
+documentation — see `repo-map.md` for details.

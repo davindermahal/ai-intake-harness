@@ -86,13 +86,16 @@ Already comprehensive — read in full rather than re-summarized here beyond the
 that vendors this harness in — gitignored there, not part of this harness's own tree. See
 `README.md` "Runtime state (gitignored)" at the repo root.
 
-## `.ai/aos-extracts/`
+## `.ai/docs/extracted/`
 
-Output of the `extract-for-aos` skill (`/extract-for-aos`, in `~/.claude/skills/extract-for-aos/`)
-run against this repo: `aos-extract-<scope-slug>-<date>.md` files, each a scoped write-up (problem,
-decisions/trade-offs, mental model, evidence, author context, article angles) of some finished
-piece of work, meant to be fed into the author's separate author-operating-system repo via
-`make capture FILE=...`. Not the harness's own documentation — a byproduct of writing about it.
+A generic destination for docs extracted from this project for use elsewhere (e.g. article
+drafting) — named without reference to any specific tool so it works for anyone, not just someone
+with access to a particular extraction skill. Currently populated by the `extract-for-aos` skill
+(`/extract-for-aos`, in `~/.claude/skills/extract-for-aos/`): `aos-extract-<scope-slug>-<date>.md`
+files, each a scoped write-up (problem, decisions/trade-offs, mental model, evidence, author
+context, article angles) of some finished piece of work, meant to be fed into the author's separate
+author-operating-system repo via `make capture FILE=...`. Not the harness's own documentation — a
+byproduct of writing about it.
 
 ## This repo's own `.ai/`
 
