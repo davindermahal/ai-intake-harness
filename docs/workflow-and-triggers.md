@@ -11,8 +11,11 @@ else to click. A background **poller** runs on a schedule, notices tickets sitti
 watches, and acts on them. Two of the transitions are performed *by the automation*; the rest — most
 importantly the approval to implement — are performed *by you*.
 
-Everything below uses the concrete Jira status names from the built-in tracker adapter. A different
-tracker adapter maps the same abstract states onto its own status names.
+Everything below uses the concrete Jira status names from the built-in tracker adapter
+(`TRACKER=jira`). If you're on the **shared-project, label-based** adapter instead
+(`TRACKER=jira-tags`), the abstract states are the same but every "move the status to…" becomes
+"add the `state:<step>` label" — see [Tag-based workflow](#tag-based-workflow-trackerjira-tags)
+below.
 
 ## The state machine, annotated with who moves each arrow
 
@@ -190,6 +193,87 @@ Implementation` gate from an unrelated state.
 | `Ready for Implementation` | poller (implementation pass) | worktree provisioned, worker launched → `In Progress` |
 | `In Progress` | worker + watchdog | success → `Ready for Verification`; failure/stall → stays `In Progress` (+ escalation) |
 | `Ready for Verification` | *you* | review the branch diff and merge; nothing is pushed/merged automatically |
+
+## Tag-based workflow (`TRACKER=jira-tags`)
+
+For one **shared Jira project used by multiple repos**, each repo's install runs with
+`TRACKER=jira-tags` instead. The board only has three real statuses (too coarse for this state
+machine), so **`state:<step>` labels are the source of truth**; native status is just a best-effort
+mirror for board legibility. Full design/rationale:
+`.ai/plans/completed/jira-tags-tracker-adapter.md`.
+
+**Two labels every ticket needs, always:**
+- **`TRACKER_APP_TAG`** (e.g. `app:my-app-name-1`, set once per repo in `.ai/intake.config`) —
+  scopes the poller to just this repo's tickets in the shared project. **Without this label the
+  poller never sees the ticket at all**, regardless of any `state:*` label.
+- **One `state:<step>` label** — exactly one at a time; the adapter errors if a ticket has zero or
+  more than one.
+
+### Required `state:*` labels — who sets each one
+
+| Abstract state | Label | Who sets it |
+|---|---|---|
+| *(pre-pipeline)* | *(none yet)* | — |
+| Ready for Planning | `state:ready-for-planning` | **you** (entry point / re-plan loop) |
+| Needs Author Input | `state:needs-author-input` | poller |
+| Plan Review | `state:plan-review` | poller |
+| Ready for Implementation | `state:ready-for-implementation` | **you only** (approval gate) |
+| In Progress | `state:in-progress` | poller |
+| Ready for Verification | `state:ready-for-verification` | worker |
+| Done | `state:done` | **you** |
+
+Legal moves (self-enforced by the adapter on every write — an illegal move is refused with a clear
+error and no label change):
+```
+ready-for-planning       → needs-author-input | plan-review
+needs-author-input       → ready-for-planning
+plan-review              → ready-for-implementation        (human only, never automated)
+ready-for-implementation → in-progress
+in-progress               → ready-for-verification | ready-for-implementation   (retry)
+ready-for-verification   → ready-for-implementation | done
+```
+
+### Getting a ticket in, and driving it, with less typing
+
+- **New ticket:** create it, then hand-apply both `TRACKER_APP_TAG` and `state:ready-for-planning`
+  in Jira's label field. This first application can't be done through the CLI helper below — there's
+  no *current* label yet for it to validate a move from.
+- **Every move after that**, prefer the CLI over typing labels by hand — it does the label
+  swap (remove old `state:*`, add new) in one call, already legality-checked, so you only ever type
+  the ticket key and the bare step name:
+  ```bash
+  ai-intake-harness/tracker-transition.sh TICKET-70 ready-for-implementation   # the approval gate
+  ai-intake-harness/tracker-transition.sh TICKET-70 done
+  ```
+- **Multi-user isolation:** every read and write is also scoped to tickets assigned to the
+  authenticated account (the shared project may have other users' installs running against it) — a
+  ticket assigned to someone else is refused even if it carries the right labels.
+- **Comments** (`tracker-comment.sh`) are *not* assignee-gated by default (`TRACKER_GATE_COMMENTS=false`)
+  so a worker can always report back, even on a ticket reassigned mid-flight; set
+  `TRACKER_GATE_COMMENTS=true` in `.ai/intake.config` to gate them too.
+
+See [Jira: making labels autocomplete instead of retyping them](#jira-making-labels-autocomplete-instead-of-retyping-them)
+below if you're hand-typing labels often.
+
+## Jira: making labels autocomplete instead of retyping them
+
+Jira's native Labels field autocompletes against every label used anywhere in the site — type a
+few characters and previously-used labels (like `app:my-app-name-1` or `state:ready-for-planning`)
+should appear in a dropdown once each has been typed in full at least once. If that's not
+happening, check that the field really is the standard **Labels** field (not a custom text field
+masquerading as one) and that your Jira admin hasn't disabled label suggestions.
+
+For the one label every ticket in a repo needs identically (`TRACKER_APP_TAG`), the real fix is to
+stop typing it at all: add a Jira **Automation** rule (Project settings → Automation → Create rule)
+— trigger **Issue created**, action **Edit issue field → Labels → Add** `app:my-app-name-1`. If the
+project is genuinely shared across multiple repos with different app tags, scope the rule's
+condition (e.g. by Component, if you set one component per repo) so it only fires for tickets
+belonging to that repo — otherwise every new ticket in the project gets the same tag. This removes
+one of the two labels you'd otherwise hand-type on every new ticket; `state:ready-for-planning`
+still needs a human decision to enter the pipeline, so it's left as a manual add (autocomplete
+should make it quick after the first use).
+
+---
 
 ## Boundaries to remember
 - The automation performs only four transitions (`Needs Author Input`, `Plan Review`, `In Progress`,

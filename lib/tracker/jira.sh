@@ -101,3 +101,24 @@ tracker_transition() {
 tracker_ticket_regex() {
     printf '%s' "${TRACKER_PROJECT_KEY}-[0-9]+"
 }
+
+# tracker_abstract_state CTX_FILE — maps this adapter's own native-status vocabulary onto the
+# harness's abstract state names, reading from an already-fetched tracker_get_issue JSON file
+# (no extra REST call). Lets tracker-agnostic worker prompts (e.g.
+# ai-intake-harness/prompts/intake-planning.md) check "is this ticket still eligible" without
+# knowing this tracker's own status names. Echoes "" for anything outside the pipeline (Backlog,
+# Selected, or an unrecognized status).
+tracker_abstract_state() {
+    local status
+    status="$(jq -r '.fields.status.name // empty' "$1")"
+    case "$status" in
+        "Ready for Planning")       printf 'ready-for-planning' ;;
+        "Needs Author Input")       printf 'needs-author-input' ;;
+        "Plan Review")              printf 'plan-review' ;;
+        "Ready for Implementation") printf 'ready-for-implementation' ;;
+        "In Progress")              printf 'in-progress' ;;
+        "Ready for Verification")   printf 'ready-for-verification' ;;
+        "Done")                     printf 'done' ;;
+        *) printf '' ;;
+    esac
+}

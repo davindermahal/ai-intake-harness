@@ -142,6 +142,17 @@ mkdir -p "$INFLIGHT_DIR" "$CONTEXT_DIR" "$DECISION_DIR" "$RUNNING_DIR" "$ATTEMPT
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
+# post_comment KEY TEXT — tracker_add_comment, but a failure (bad payload, transient network/API
+# error, tracker outage) logs and continues instead of propagating under `set -e`. A raw
+# `tracker_add_comment` call left unguarded would abort THIS ENTIRE POLL RUN on any failure,
+# stranding whatever ticket was mid-flight (inflight marker never cleared, no transition, no
+# escalation) until the stale-inflight reclaim kicks in — and if the failure is deterministic
+# (e.g. a too-long comment), every retry would hit the same wall. A comment is best-effort
+# reporting, never something worth losing the rest of the poll cycle over.
+post_comment() {
+    tracker_add_comment "$1" "$2" || log "  $1: comment post failed (tracker/jira: see error above) — continuing"
+}
+
 # ----- tracker + project + AI adapters (config-selected) -------------------------------
 # Provides: tracker_load_env, tracker_search, tracker_get_issue, tracker_add_comment,
 # tracker_transition, tracker_ticket_regex (plus the project_* contract, unused here but loaded
@@ -264,7 +275,7 @@ dispatch_escalate_once() {
         log "  $key: $phase dispatch still failing (AI spec '$spec') — already reported, not re-commenting"
         return 0
     fi
-    tracker_add_comment "$key" "$message"
+    post_comment "$key" "$message"
     printf '%s' "$spec" > "$marker"
 }
 dispatch_escalation_clear() { rm -f "$(dispatch_marker "$1" "$2")"; }
@@ -356,8 +367,14 @@ load_ai_provider() {
 # ----- dispatch -----------------------------------------------------------------------
 dispatch_planning() {
     local key="$1"; local ctx="$CONTEXT_DIR/$key.json" dec="$DECISION_DIR/$key.json"
-    local summary branch wt action comment spec provider model saved_model saved_timeout rc
+    local summary branch wt action comment spec provider model saved_model saved_timeout rc abstract_state tmp_ctx
     tracker_get_issue "$key" > "$ctx"
+    # Tracker-agnostic eligibility field for prompts/intake-planning.md's re-check (guards the race
+    # between tracker_search finding the ticket and this dispatch actually running) — computed from
+    # the adapter's own status/label vocabulary via tracker_abstract_state so the prompt never needs
+    # to know which tracker is configured.
+    abstract_state="$(tracker_abstract_state "$ctx")"
+    tmp_ctx="$(mktemp)" && jq --arg s "$abstract_state" '. + {abstract_state: $s}' "$ctx" > "$tmp_ctx" && mv "$tmp_ctx" "$ctx"
     summary="$(jq -r '.fields.summary // ""' "$ctx")"
     spec="$(resolve_ai_profile "$ctx" planning)"
     provider="$(spec_provider "$spec")"
@@ -421,10 +438,10 @@ dispatch_planning() {
     # never pushed, so a Bitbucket link would 404). Must read it BEFORE removing the worktree.
     # `make jira-plan KEY=$key` prints the same file locally. Jira wiki: {code}…{code} = code block.
     if [ "$action" = "clean" ] && [ -n "$plan_file" ]; then
-        local plan_path="$plan_file"
+        local plan_path="$plan_file" inline_block
         case "$plan_path" in /*) ;; *) plan_path="$wt/$plan_path" ;; esac
         if [ -f "$plan_path" ]; then
-            comment="$comment
+            inline_block="
 
 ----
 *Full plan* (\`$plan_file\`) — also available locally via \`make jira-plan KEY=$key\`:
@@ -432,6 +449,19 @@ dispatch_planning() {
 {code}
 $(cat "$plan_path")
 {code}"
+            # Jira's comment body has a hard 32767-character limit; a large plan inlined here can
+            # blow past it (the request is then rejected outright — nothing posts, not even a
+            # truncated version). Prefer linking to the file over truncating mid-plan, which would
+            # both mangle the markdown and leave an unclosed {code} block. 32000 leaves headroom
+            # for the summary text above plus JIRA_AI_COMMENT_FOOTER added by tracker_add_comment.
+            if [ $(( ${#comment} + ${#inline_block} )) -lt 32000 ]; then
+                comment="$comment$inline_block"
+            else
+                comment="$comment
+
+----
+Full plan (\`$plan_file\`, $(wc -c < "$plan_path") bytes) is too large to inline in a comment — see the committed file on \`$branch\`, or run \`make jira-plan KEY=$key\` locally."
+            fi
         else
             log "  $key: plan_file '$plan_file' not found — posting summary without inline plan"
         fi
@@ -439,7 +469,7 @@ $(cat "$plan_path")
 
     git -C "$REPO_ROOT" worktree remove --force "$wt" 2>/dev/null || true
 
-    [ -n "$comment" ] && tracker_add_comment "$key" "$comment"   # always post the summary
+    [ -n "$comment" ] && post_comment "$key" "$comment"   # always post the summary (best-effort)
     case "$action" in
         questions) tracker_transition "$key" needs-author-input && inflight_clear "$key" ;;
         clean)     tracker_transition "$key" plan-review        && inflight_clear "$key" ;;
@@ -514,7 +544,7 @@ dispatch_implementation() {
     if logfile="$(launch_implementation_worker "$key" "$branch" "$provider" "$model")"; then
         attempts_reset "$key"
         dispatch_escalation_clear "$key" implementation
-        tracker_add_comment "$key" "Implementation launched on branch \`$branch\` via make worktree-go (headless, AI: $spec). A worker is implementing the committed plan, building, and verifying; it will post results here. Nothing is pushed, merged, or deployed automatically — review the branch and merge when ready."
+        post_comment "$key" "Implementation launched on branch \`$branch\` via make worktree-go (headless, AI: $spec). A worker is implementing the committed plan, building, and verifying; it will post results here. Nothing is pushed, merged, or deployed automatically — review the branch and merge when ready."
         tracker_transition "$key" in-progress && inflight_clear "$key"
     else
         log "  $key: worktree-go FAILED (see $logfile)"
@@ -550,7 +580,7 @@ watchdog_stalled_comment_after() {
 # re-queues it and (via dispatch_implementation's attempts_reset) clears the escalation.
 watchdog_escalate() {
     local key="$1" message="$2"
-    tracker_add_comment "$key" "Watchdog: $key $message"
+    post_comment "$key" "Watchdog: $key $message"
     attempts_mark_escalated "$key"
 }
 
@@ -630,7 +660,7 @@ watchdog_check() {
 
     if logfile="$(launch_implementation_worker "$key" "$branch" "$provider" "$model")"; then
         attempts_bump "$key"
-        tracker_add_comment "$key" "Watchdog: relaunching the stalled implementation worker on branch \`$branch\` (attempt $next/$JIRA_MAX_ATTEMPTS) — the previous worker did not respond. It resumes in the existing worktree and will post results here when done."
+        post_comment "$key" "Watchdog: relaunching the stalled implementation worker on branch \`$branch\` (attempt $next/$JIRA_MAX_ATTEMPTS) — the previous worker did not respond. It resumes in the existing worktree and will post results here when done."
     else
         log "  $key: restart FAILED (see $logfile)"
         watchdog_escalate "$key" "a restart attempt failed during worktree provisioning (see poller log $logfile on the build host)."
