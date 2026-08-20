@@ -11,12 +11,20 @@
 #   echo "..." | ai-intake-harness/tracker-comment.sh <KEY> -
 #
 # Credentials/config come from .env / .env.local and .ai/intake.config via the configured
-# tracker adapter (Jira today — ai-intake-harness/lib/tracker/jira.sh). Run from the worktree (or
-# anywhere with a .env).
+# tracker adapter (see ai-intake-harness/lib/intake-config.sh — TRACKER selects it). Run from the
+# worktree (or anywhere with a .env).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Vendored (git subtree): this dir is a subdirectory of the consumer repo, so its own git
+# top-level is the consumer root one level up. Self-hosted (this harness driving its own
+# development, no subtree prefix): this dir IS the repo root, so its git top-level is itself —
+# detect that and use SCRIPT_DIR directly instead of walking past the actual root.
+if [ "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" = "$SCRIPT_DIR" ]; then
+    REPO_ROOT="$SCRIPT_DIR"
+else
+    REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 
 KEY="${1:-}"
 BODY_ARG="${2:-}"
@@ -32,8 +40,8 @@ else
 fi
 [ -n "$BODY" ] || { echo "Refusing to post an empty comment to $KEY" >&2; exit 2; }
 
-# shellcheck source=ai-intake-harness/lib/tracker/jira.sh
-. "$SCRIPT_DIR/lib/tracker/jira.sh"
+# shellcheck source=ai-intake-harness/lib/intake-config.sh
+. "$SCRIPT_DIR/lib/intake-config.sh" "$REPO_ROOT"
 tracker_load_env "$REPO_ROOT"
 
 tracker_add_comment "$KEY" "$BODY"

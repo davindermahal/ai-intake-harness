@@ -76,17 +76,31 @@ From your repo root:
 git subtree add --prefix=ai-intake-harness https://github.com/davindermahal/ai-intake-harness.git main --squash
 ```
 
-### 2. Create `.ai/intake.config` in your repo
+### 2. Set up Jira credentials
+
+Run the install helper from your repo root — it copies `.env.local.dist` to `.env.local`
+(gitignored), reminds you what to fill in, prints the crontab entry for step 6 with your repo's
+actual path baked in, and tests that the harness can reach Jira once you've filled in the
+credentials:
+```bash
+ai-intake-harness/install.sh
+# ... fill in .env.local (JIRA_SITE_URL, JIRA_INTAKE_EMAIL, JIRA_INTAKE_API_TOKEN) ...
+ai-intake-harness/install.sh --test-only
+```
+
+### 3. Create `.ai/intake.config` in your repo
 
 Selects which tracker and project adapter to use:
 ```bash
-TRACKER=jira                    # or github, or your custom tracker adapter
+TRACKER=jira                    # or jira-tags, github, or your custom tracker adapter
 TRACKER_PROJECT_KEY=MYPROJ      # your tracker's project identifier
+# TRACKER_APP_TAG=app:my-app-name-1   # required only for TRACKER=jira-tags — see below
+# TRACKER_GATE_COMMENTS=true          # TRACKER=jira-tags only; default false (comments ungated) — see below
 PROJECT_ADAPTER=my-stack        # selects scripts/lib/project/my-stack.sh in YOUR repo
 PROJECT_DB_PREFIX=mydb          # database name prefix for worktrees (e.g., mydb_feature_1_...)
 ```
 
-### 3. Write a project adapter for your stack
+### 4. Write a project adapter for your stack
 
 Create `scripts/lib/project/my-stack.sh`. It must export these functions:
 
@@ -115,7 +129,7 @@ Example: `.claude/settings.my-stack.json`.
 
 For a worked example of a Symfony/Docker project adapter implementing this contract, see `scripts/lib/project/symfony-docker.sh` in the harness's original consumer project (private, not yet public).
 
-### 4. Wire up the Makefile
+### 5. Wire up the Makefile
 
 Add these targets to your `Makefile`:
 
@@ -147,7 +161,7 @@ intake-plan:
 > `intake-*` targets above are a minimal set, worth extending with your own dashboard/status
 > script over the same `.intake/` files as your usage grows.
 
-### 5. Set up the cron poller
+### 6. Set up the cron poller
 
 Create a small wrapper script for cron — the harness does **not** ship one, because the wrapper
 holds host-specific credentials (Claude auth) and paths. Keep it out of git (gitignore whatever
@@ -162,7 +176,8 @@ cd /path/to/repo
 exec /usr/bin/flock -n .intake/poll.lock bash ai-intake-harness/intake-poll.sh
 ```
 
-Then add a crontab entry (e.g., every 2 minutes):
+Then add a crontab entry (e.g., every 2 minutes) — `ai-intake-harness/install.sh` (step 2) already
+printed this for you with your repo's actual path filled in:
 ```bash
 */2 * * * * /path/to/repo/scripts/intake-cron.sh >> /path/to/repo/.intake/poll.log 2>&1
 ```
@@ -170,7 +185,7 @@ Then add a crontab entry (e.g., every 2 minutes):
 (The `flock` in the wrapper guarantees concurrent runs don't collide. Because the wrapper is
 host-only and gitignored, renaming harness scripts never updates it — re-check it after renames.)
 
-### 6. Create a curated permission profile
+### 7. Create a curated permission profile
 
 Write `.claude/settings.<adapter-name>.json` with an allow/deny list for unattended workers.
 Restrict to build/test/verify tools; deny anything destructive.
@@ -212,7 +227,9 @@ Implement these shell functions:
 - **`tracker_transition <key> <state>`** — transition the ticket to an abstract state. States: `needs-author-input`, `plan-review`, `ready-for-implementation`, `in-progress`, `ready-for-verification`, `done`.
 - **`tracker_ticket_regex`** — echo a regex pattern to extract ticket keys from branch names (e.g., `PROJ-[0-9]+` for Jira).
 
-**Built-in adapter:** `lib/tracker/jira.sh` — Jira Cloud REST, single API-token account.
+**Built-in adapters:**
+- `lib/tracker/jira.sh` — Jira Cloud REST, single API-token account, native Jira status field drives the workflow.
+- `lib/tracker/jira-tags.sh` — Jira Cloud REST for one **shared project used by multiple repos**. Each repo/install is assigned a unique `TRACKER_APP_TAG` (e.g. `app:my-app-name-1`) that scopes every query to just that repo's tickets, and the workflow is driven by `state:<step>` labels instead of the status field (useful when the real status field is too coarse, or the board is locked down). Every query and state-changing write is additionally scoped to tickets assigned to the authenticated account, since the shared project may have multiple users. Comments are the one exception: they're ungated by default (`TRACKER_GATE_COMMENTS=false`) so a worker can always report back — even on a ticket reassigned out from under it mid-flight — set `TRACKER_GATE_COMMENTS=true` to gate them too. See `.ai/plans/completed/jira-tags-tracker-adapter.md` for the full design.
 
 ### Project adapter: `scripts/lib/project/<name>.sh`
 
