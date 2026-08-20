@@ -8,6 +8,8 @@
 # Usage: . "$(dirname "$0")/lib/intake-config.sh" <repo-root>
 #
 # Sets/exports: TRACKER TRACKER_PROJECT_KEY PROJECT_ADAPTER PROJECT_DB_PREFIX PROJECT_TICKET_REGEX
+# (plus TRACKER_APP_TAG and TRACKER_GATE_COMMENTS, passed through with no default here — both are
+# TRACKER=jira-tags-only and default inside lib/tracker/jira-tags.sh itself)
 # PLAN_WORKTREE_PREFIX AI_PROVIDER AI_PLANNING_MODEL AI_IMPLEMENTATION_MODEL AI_LOCAL_LLM_BASE_URL
 # AI_LOCAL_LLM_MODEL AI_LOCAL_LLM_TIMEOUT (plus any AI_PROFILE_* the config declares), and loads every tracker_* /
 # project_* / ai_* function from the selected adapters. A per-ticket AI profile/provider override
@@ -31,7 +33,7 @@ _intake_config_file="${_intake_repo_root}/.ai/intake.config"
 # silently clobber it (which is exactly how `PROVIDER=... make worktree-go` and the poller's
 # per-ticket PROVIDER/MODEL handoff used to get lost whenever the key also appeared in
 # .ai/intake.config). Snapshot the caller's non-empty values first, restore them after sourcing.
-_intake_env_keys="TRACKER TRACKER_PROJECT_KEY PROJECT_ADAPTER PROJECT_DB_PREFIX PROJECT_ADAPTER_PATH
+_intake_env_keys="TRACKER TRACKER_PROJECT_KEY TRACKER_APP_TAG TRACKER_GATE_COMMENTS PROJECT_ADAPTER PROJECT_DB_PREFIX PROJECT_ADAPTER_PATH
     PLAN_WORKTREE_PREFIX AI_PROVIDER AI_PLANNING_MODEL AI_IMPLEMENTATION_MODEL
     AI_LOCAL_LLM_BASE_URL AI_LOCAL_LLM_MODEL AI_LOCAL_LLM_TIMEOUT"
 for _k in $_intake_env_keys; do

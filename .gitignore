@@ -6,6 +6,16 @@
 # Runtime state (see README.md "Runtime state (gitignored)")
 .intake/
 
+# Self-hosting (dogfooding): this repo uses its own Jira ticketing to drive its own development
+# (see README.md "Quickstart" step 2 / .ai/plans/completed/jira-tags-tracker-adapter.md). These
+# wire the harness to Jira, and provision worktrees, for THAT purpose only — never committed, so
+# they can never ship to a consumer that vendors this repo via git subtree.
+/.ai/intake.config
+/.ai/prompts/
+/scripts/
+/Makefile
+/.claude/settings.ai-harness-dev.json
+
 # JetBrains
 .idea/
 
