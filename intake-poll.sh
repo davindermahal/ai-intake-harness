@@ -97,7 +97,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Vendored (git subtree): this dir is a subdirectory of the consumer repo, so its own git
+# top-level is the consumer root one level up. Self-hosted (this harness driving its own
+# development, no subtree prefix): this dir IS the repo root — see tracker-comment.sh for the
+# same detection.
+if [ "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" = "$SCRIPT_DIR" ]; then
+    REPO_ROOT="$SCRIPT_DIR"
+else
+    REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 cd "$REPO_ROOT"
 
 # ----- config / env -------------------------------------------------------------------

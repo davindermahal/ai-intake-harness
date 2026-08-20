@@ -5,24 +5,34 @@
 # to move a ticket to "Ready for Verification" after a SUCCESSFUL build + verify — the signal
 # to the author that the AI is done and it is their turn to review/merge. On failure the worker
 # leaves it *In Progress* instead, so "still In Progress" reliably means "not finished".
-# Mirrors ai-intake-harness/tracker-comment.sh; the transition itself lives in the tracker
-# adapter (ai-intake-harness/lib/tracker/jira.sh's tracker_transition_to_status), the single REST
-# chokepoint. Also handy by hand.
+# Mirrors ai-intake-harness/tracker-comment.sh; the transition itself lives in the configured
+# tracker adapter's tracker_transition_to_status (see ai-intake-harness/lib/intake-config.sh —
+# TRACKER selects it), the single REST chokepoint. Also handy by hand.
 #
 # Usage:
-#   ai-intake-harness/tracker-transition.sh <KEY> "<Target Status Name>"
-#   ai-intake-harness/tracker-transition.sh TICKET-70 "Ready for Verification"
+#   ai-intake-harness/tracker-transition.sh <KEY> "<Target>"
+#   ai-intake-harness/tracker-transition.sh TICKET-70 "Ready for Verification"     # TRACKER=jira
+#   ai-intake-harness/tracker-transition.sh TICKET-70 ready-for-verification      # TRACKER=jira-tags
 #
-# Resolves by TARGET status name (more stable than a transition id) and only succeeds if a
-# transition to that status is available from the ticket's current status — so it can never
-# perform the human-only Plan Review -> Ready for Implementation gate from an unrelated state.
+# TARGET's vocabulary is adapter-specific: a literal Jira status name for TRACKER=jira, or a
+# state:<step> step name (e.g. "ready-for-implementation") for TRACKER=jira-tags — see the
+# configured adapter's tracker_transition_to_status. Either way it only succeeds if that move is
+# legal from the ticket's current state — so it can never perform the human-only Plan Review ->
+# Ready for Implementation gate from an unrelated state.
 #
 # Credentials/config come from .env / .env.local and .ai/intake.config via the configured
 # tracker adapter. Run from the worktree (or anywhere with a .env).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# See tracker-comment.sh for why: distinguishes a vendored (git-subtree) install, where this dir
+# is a subdirectory of the consumer repo, from a self-hosted checkout where this dir IS the repo
+# root (this harness driving its own development).
+if [ "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" = "$SCRIPT_DIR" ]; then
+    REPO_ROOT="$SCRIPT_DIR"
+else
+    REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 
 KEY="${1:-}"
 TARGET="${2:-}"
@@ -31,8 +41,8 @@ if [ -z "$KEY" ] || [ -z "$TARGET" ]; then
     exit 2
 fi
 
-# shellcheck source=ai-intake-harness/lib/tracker/jira.sh
-. "$SCRIPT_DIR/lib/tracker/jira.sh"
+# shellcheck source=ai-intake-harness/lib/intake-config.sh
+. "$SCRIPT_DIR/lib/intake-config.sh" "$REPO_ROOT"
 tracker_load_env "$REPO_ROOT"
 
 tracker_transition_to_status "$KEY" "$TARGET"
