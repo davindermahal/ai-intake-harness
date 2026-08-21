@@ -16,6 +16,10 @@
 /Makefile
 /.claude/settings.ai-harness-dev.json
 
+# Python (lib/tracker/jira_cookie_extract.py)
+__pycache__/
+*.pyc
+
 # JetBrains
 .idea/
 

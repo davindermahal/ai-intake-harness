@@ -45,6 +45,20 @@ user, so a footer marker is needed to distinguish AI comments from human ones. I
 exactly one tracker chokepoint, it works headlessly on any machine, and the AI workers stay sandboxed
 away from the tracker.
 
+**Update: optional browser-cookie fallback for accounts that can't get a token issued.** Some org
+policies block self-service Atlassian API tokens entirely, with no exception process. For that
+specific case, `lib/tracker/jira-common.sh` falls back to authenticating with a session cookie
+extracted fresh from the local browser on every run (`lib/tracker/jira-cookie.sh`) instead of
+`JIRA_INTAKE_EMAIL`/`JIRA_INTAKE_API_TOKEN` — see
+`.ai/plans/active/jira-cookie-auth-fallback.md`. This is a real, accepted departure from "runs
+unattended on a build host," scoped narrowly on purpose: it only engages when no token is
+configured (an API token stays the default and recommended path whenever one can be issued); a
+session cookie is bearer-equivalent to the full logged-in human (broader access than a scoped
+token, and never written to disk); and the machine running cron must have an actively logged-in
+desktop browser session, not a headless box — if that browser session ever fully ends, the
+automation stops until a human logs back in (there's no safe way to script re-login through
+SSO/MFA, so this fails loudly rather than trying).
+
 ---
 
 ## 3. The plan file as the seam between planning and implementation
