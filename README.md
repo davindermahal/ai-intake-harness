@@ -79,8 +79,10 @@ git subtree add --prefix=ai-intake-harness https://github.com/davindermahal/ai-i
 ### 2. Set up Jira credentials
 
 Run the install helper from your repo root — it copies `.env.local.dist` to `.env.local`
-(gitignored), reminds you what to fill in, prints the crontab entry for step 6 with your repo's
-actual path baked in, and tests that the harness can reach Jira once you've filled in the
+(gitignored), reminds you what to fill in, scaffolds the `scripts/intake-cron.sh` wrapper from
+step 6's template (gitignored — you still need to fill in `ANTHROPIC_API_KEY`), prints the
+crontab entry with your repo's actual path baked in (or installs it directly with
+`--install-cron`), and tests that the harness can reach Jira once you've filled in the
 credentials:
 ```bash
 ai-intake-harness/install.sh
@@ -130,6 +132,10 @@ TRACKER=jira                    # or jira-tags, github, or your custom tracker a
 TRACKER_PROJECT_KEY=MYPROJ      # your tracker's project identifier
 # TRACKER_APP_TAG=app:my-app-name-1   # required only for TRACKER=jira-tags — see below
 # TRACKER_GATE_COMMENTS=true          # TRACKER=jira-tags only; default false (comments ungated) — see below
+# TRACKER_NATIVE_STATUS_IN_PROGRESS=In Development   # TRACKER=jira-tags only; this project's board
+#                                      # column name for "actively being worked" (default "In Progress")
+# TRACKER_NATIVE_STATUS_CODE_REVIEW=Code Review      # TRACKER=jira-tags only; this project's board
+#                                      # column name for "ready for review" (default "Code Review")
 # JIRA_COOKIE_BROWSER=chrome          # only relevant if you're using the cookie auth fallback
 #                                      # (no API token — see step 2) and want to pin one browser;
 #                                      # install.sh doesn't read this file, so pass it as an env
@@ -201,9 +207,9 @@ intake-plan:
 
 ### 6. Set up the cron poller
 
-Create a small wrapper script for cron — the harness does **not** ship one, because the wrapper
-holds host-specific credentials (Claude auth) and paths. Keep it out of git (gitignore whatever
-you name it, e.g. `scripts/intake-cron.sh`):
+`ai-intake-harness/install.sh` (step 2) already scaffolded `scripts/intake-cron.sh` for you from
+the template below — the harness doesn't ship this file itself, because it holds host-specific
+credentials (Claude auth) and paths, so it's gitignored and created locally on first run instead:
 
 ```bash
 # intake-cron.sh (consumer-created, gitignored; chmod +x)
@@ -214,11 +220,15 @@ cd /path/to/repo
 exec /usr/bin/flock -n .intake/poll.lock bash ai-intake-harness/intake-poll.sh
 ```
 
-Then add a crontab entry (e.g., every 2 minutes) — `ai-intake-harness/install.sh` (step 2) already
-printed this for you with your repo's actual path filled in:
+Edit it to fix the `ANTHROPIC_API_KEY` line (or swap in `CLAUDE_CODE_OAUTH_TOKEN`), then add the
+crontab entry (e.g., every 2 minutes) — `install.sh` already printed this for you with your repo's
+actual path filled in, or install it directly:
 ```bash
+ai-intake-harness/install.sh --install-cron
+# or add it yourself via 'crontab -e':
 */2 * * * * /path/to/repo/scripts/intake-cron.sh >> /path/to/repo/.intake/poll.log 2>&1
 ```
+`--install-cron` is idempotent — safe to re-run, it skips if the entry's already there.
 
 (The `flock` in the wrapper guarantees concurrent runs don't collide. Because the wrapper is
 host-only and gitignored, renaming harness scripts never updates it — re-check it after renames.)
