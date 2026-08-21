@@ -113,7 +113,10 @@ $JIRA_AI_COMMENT_FOOTER"
     body="$(jq -n --arg b "$text" '{body:$b}')"
     resp="$(jira_api POST "/rest/api/2/issue/$key/comment" "$body")"
     if echo "$resp" | jq -e 'has("errorMessages") or has("errors")' >/dev/null 2>&1; then
-        echo "tracker/jira: comment on $key may have failed: $(echo "$resp" | jq -c '.errorMessages // .errors')" >&2
+        # `//` would wrongly pick .errorMessages even when it's present-but-empty (a common Jira
+        # shape: {"errorMessages":[],"errors":{"comment":"..."}}), hiding the actual message —
+        # prefer whichever of the two is non-empty.
+        echo "tracker/jira: comment on $key may have failed: $(echo "$resp" | jq -c 'if (.errorMessages // [] | length) > 0 then .errorMessages else .errors end')" >&2
         return 1
     fi
 }

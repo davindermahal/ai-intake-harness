@@ -1,8 +1,9 @@
 # Prompt: Intake Planning Routine (run per ticket on the planning queue)
 
-You have been invoked by the intake poller for **one ticket** that is in the
-**`Ready for Planning`** status. Your job is to turn that ticket into a structured plan file and
-emit a **decision** telling the poller how to route it. Follow these steps exactly.
+You have been invoked by the intake poller for **one ticket** in the planning queue — abstract
+state **`ready-for-planning`** (a literal Jira status or a `state:ready-for-planning` label,
+depending on the configured tracker adapter). Your job is to turn that ticket into a structured
+plan file and emit a **decision** telling the poller how to route it. Follow these steps exactly.
 
 > **Full-REST design — you do NOT talk to the tracker.** The poller (`ai-intake-harness/intake-poll.sh`)
 > performs all tracker I/O — read, comment, transition — over REST through the configured tracker
@@ -30,7 +31,11 @@ branch after you finish. The dispatch prompt gives you:
 - **Branch** — e.g. `feature/TICKET-123-<slug>`. Use **exactly this** in the plan's `**Branch**:` line
   (the poller already decided it; do not invent a different one).
 - **Context file** — `.intake/context/<KEY>.json`: the ticket's current `summary`, `status`,
-  `description`, and existing `comments` (tracker-normalized JSON; bodies are plain text).
+  `description`, and existing `comments` (tracker-normalized JSON; bodies are plain text), plus a
+  top-level `abstract_state` field — the tracker-agnostic abstract state name (e.g.
+  `ready-for-planning`), already translated from whichever tracker adapter is configured (Jira
+  status name, Jira label, or otherwise). Use `abstract_state`, not the tracker's own raw
+  `fields.status`/labels, so this routine never needs to know which tracker is configured.
 - **Decision file** — `.intake/decision/<KEY>.json`: you **write** this at the end.
 
 ## 1. Read the ticket
@@ -38,8 +43,9 @@ branch after you finish. The dispatch prompt gives you:
 Read the context file. Use the `description` as the original input and read the existing
 `comments` so you don't re-ask something the author already answered.
 
-If `fields.status.name` is **not** `Ready for Planning`, write a decision with
-`{"action":"skip","comment":"Status was <X>, not Ready for Planning — skipped."}` and stop.
+If `abstract_state` is **not** `ready-for-planning`, write a decision with
+`{"action":"skip","comment":"Ticket was no longer in the planning queue (abstract_state=<X>) — skipped."}`
+and stop.
 
 ## 2. Find or create the plan file
 
