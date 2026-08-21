@@ -4,9 +4,12 @@
 # contract as lib/tracker/jira.sh, sharing REST/auth plumbing with it via jira-common.sh, but:
 #
 #   - Represents the harness's abstract workflow state as `state:<step>` labels instead of the
-#     native status field, which on this project only has three values (Todo / In Progress /
-#     Code Review) — too coarse to carry the full state machine. Every label write best-effort
-#     mirrors a collapsed native status for board legibility; the label is the source of truth.
+#     native status field, which on a typical shared project only has a few values (e.g. Todo /
+#     In Progress / Code Review) — too coarse to carry the full state machine. Every label write
+#     best-effort mirrors a collapsed native status for board legibility; the label is the source
+#     of truth. The two mirror-target column names are configurable per project (see
+#     TRACKER_NATIVE_STATUS_IN_PROGRESS / TRACKER_NATIVE_STATUS_CODE_REVIEW below) since different
+#     projects vendoring this harness name their columns differently.
 #   - Scopes every query to one repo's tickets within the shared project via a TRACKER_APP_TAG
 #     label (e.g. app:my-app-name-1), plus the authenticated account's own assignment
 #     (assignee = currentUser()), since the shared project may have multiple assigned users and a
@@ -17,11 +20,15 @@
 #     jira.sh: tracker_transition has no `ready-for-implementation` case, so the automation can
 #     never perform that transition regardless of what the legal-move table would allow.
 #
-# Required env (see jira-common.sh's jira_common_load_env): JIRA_SITE_URL, JIRA_INTAKE_EMAIL,
-# JIRA_INTAKE_API_TOKEN.
+# Required env (see jira-common.sh's jira_common_load_env): JIRA_SITE_URL, plus either
+# JIRA_INTAKE_EMAIL + JIRA_INTAKE_API_TOKEN (API-token auth) or, if those are unset, a browser
+# session cookie fallback (see lib/tracker/jira-cookie.sh and
+# .ai/plans/active/jira-cookie-auth-fallback.md).
 # Required config (.ai/intake.config): TRACKER_PROJECT_KEY, TRACKER_APP_TAG.
 # Optional config: TRACKER_GATE_COMMENTS=true to also assignee-gate tracker_add_comment (default:
 # false — see the module comment on tracker_add_comment for why comments are ungated by default).
+# TRACKER_NATIVE_STATUS_IN_PROGRESS / TRACKER_NATIVE_STATUS_CODE_REVIEW to match this project's own
+# board column names (defaults: "In Progress" / "Code Review" — see jira_tags_native_status).
 
 # Guard against double-sourcing
 [ -n "${_TRACKER_JIRA_TAGS_LOADED:-}" ] && return 0
@@ -38,6 +45,14 @@ TRACKER_PROJECT_KEY="${TRACKER_PROJECT_KEY:-PROJ}"
 # Default: comments are NOT assignee-gated (see tracker_add_comment below) — set to "true" in
 # .ai/intake.config to re-enable the stricter, gated behavior this adapter shipped with.
 TRACKER_GATE_COMMENTS="${TRACKER_GATE_COMMENTS:-false}"
+
+# Native-status mirror targets (see jira_tags_native_status below) — this project's own board
+# column names for "actively being worked" and "ready for review". The state:* label is the real
+# source of truth; these are a best-effort UI mirror, and different projects vendoring this
+# harness can use different column names (e.g. "In Development" instead of "In Progress").
+# Override in .ai/intake.config if this project's board doesn't use the defaults.
+TRACKER_NATIVE_STATUS_IN_PROGRESS="${TRACKER_NATIVE_STATUS_IN_PROGRESS:-In Progress}"
+TRACKER_NATIVE_STATUS_CODE_REVIEW="${TRACKER_NATIVE_STATUS_CODE_REVIEW:-Code Review}"
 
 # tracker_load_env REPO_ROOT — shared Jira secrets plus this adapter's own required config: the
 # per-repo app-scoping tag. Fails loudly if TRACKER_APP_TAG is unset, same as the Jira secrets do.
@@ -97,14 +112,16 @@ jira_tags_legal_move() {
     esac
 }
 
-# jira_tags_native_status TARGET — maps a state:* step onto this project's 3-status board (Todo is
-# pre-pipeline only and is never written here). Internal helper.
+# jira_tags_native_status TARGET — maps a state:* step onto this project's 3-status board (the
+# pre-pipeline "to do" column is never written here). Column names come from
+# TRACKER_NATIVE_STATUS_IN_PROGRESS / TRACKER_NATIVE_STATUS_CODE_REVIEW (.ai/intake.config).
+# Internal helper.
 jira_tags_native_status() {
     case "$1" in
         ready-for-planning|needs-author-input|plan-review|ready-for-implementation|in-progress)
-            printf 'In Progress' ;;
+            printf '%s' "$TRACKER_NATIVE_STATUS_IN_PROGRESS" ;;
         ready-for-verification|done)
-            printf 'Code Review' ;;
+            printf '%s' "$TRACKER_NATIVE_STATUS_CODE_REVIEW" ;;
         *) echo "tracker/jira-tags: unknown state '$1' for native-status mapping" >&2; return 1 ;;
     esac
 }

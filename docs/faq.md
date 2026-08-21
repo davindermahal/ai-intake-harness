@@ -18,9 +18,18 @@ No. Approving a reviewed plan for implementation is a human-only transition. The
 cannot perform that step — the tracker adapter doesn't even map it.
 
 ### Which issue trackers are supported?
-There is a built-in adapter for a hosted Jira instance (over REST with an API token). Other trackers
-(e.g. GitHub Issues) can be supported by writing a new tracker adapter implementing the same contract;
-a GitHub adapter is anticipated but not yet built.
+There is a built-in adapter for a hosted Jira instance (over REST, authenticated with an API token
+or, if you can't get one issued, a browser session cookie fallback — see the next question). Other
+trackers (e.g. GitHub Issues) can be supported by writing a new tracker adapter implementing the
+same contract; a GitHub adapter is anticipated but not yet built.
+
+### Do I need to install Python for the Jira adapter?
+No, not by default. The Jira adapter normally authenticates with an API token over plain REST — no
+Python involved. Python (plus `pip install browser_cookie3`) is only needed if you use the
+**browser-cookie fallback**, for accounts that can't get an API token issued: it extracts a fresh
+session cookie from your local Chrome/Firefox login on every run instead of using a token. See
+`README.md` "Set up Jira credentials" for setup and `ai-intake-harness/install.sh --test-cookie` for
+how to verify that path specifically.
 
 ### Which AI backends does it support?
 The default and only fully-working provider drives the Claude Code CLI. There is an optional local-LLM
@@ -63,10 +72,10 @@ and not pushed, a clean plan's full text is inlined into the review comment on t
 read and approve it without a checkout; a local command prints the same file.
 
 ### Why does the poller talk to the tracker instead of the AI agent?
-So the whole workflow can run unattended. Using the tracker's REST API with a token avoids any
-interactive login or agent-side tracker tool, and concentrates all tracker access in one place. The AI
-workers never touch the tracker directly; they post results through helper scripts that use the same
-single chokepoint.
+So the whole workflow can run unattended. Using the tracker's REST API with a token (or, for accounts
+that can't get one, a browser session cookie) avoids any interactive OAuth login or agent-side
+tracker tool, and concentrates all tracker access in one place. The AI workers never touch the
+tracker directly; they post results through helper scripts that use the same single chokepoint.
 
 ### How can I tell an AI-written comment from a human one?
 Every comment the automation posts carries a small footer marker. Because it's applied at the single

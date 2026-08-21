@@ -91,6 +91,10 @@ classification:
       what: >
         The tracker API token, any API keys, database passwords, and similar secrets. These are
         read from gitignored env files at runtime and are NOT reproduced in any of these docs.
+        Same treatment for the Jira browser-session-cookie fallback (for accounts without an API
+        token): the extracted cookie is bearer-equivalent to full account access and is never
+        written to disk, but is equally a secret if it ever appears in a log or example — ignore it
+        the same way.
       reason: Secrets — ignore entirely. Never extract, never publish.
 
 notes:

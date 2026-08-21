@@ -79,14 +79,50 @@ git subtree add --prefix=ai-intake-harness https://github.com/davindermahal/ai-i
 ### 2. Set up Jira credentials
 
 Run the install helper from your repo root — it copies `.env.local.dist` to `.env.local`
-(gitignored), reminds you what to fill in, prints the crontab entry for step 6 with your repo's
-actual path baked in, and tests that the harness can reach Jira once you've filled in the
+(gitignored), reminds you what to fill in, scaffolds the `scripts/intake-cron.sh` wrapper from
+step 6's template (gitignored — you still need to fill in `ANTHROPIC_API_KEY`), prints the
+crontab entry with your repo's actual path baked in (or installs it directly with
+`--install-cron`), and tests that the harness can reach Jira once you've filled in the
 credentials:
 ```bash
 ai-intake-harness/install.sh
 # ... fill in .env.local (JIRA_SITE_URL, JIRA_INTAKE_EMAIL, JIRA_INTAKE_API_TOKEN) ...
 ai-intake-harness/install.sh --test-only
 ```
+
+**No API token available** (e.g. blocked by org policy)? Leave `JIRA_INTAKE_EMAIL`/
+`JIRA_INTAKE_API_TOKEN` blank in `.env.local` instead — the harness falls back to authenticating
+with a browser session cookie. This is the **only** thing in the harness that needs Python; if
+you're using the API token, skip this whole section, nothing here applies to you.
+
+- **Setup:** `pip install browser_cookie3` on the machine that runs cron, and stay logged into
+  Jira in Chrome or Firefox there.
+- **How it works:** a fresh cookie is extracted straight from the browser's cookie store on every
+  run (each poll cycle, each `tracker-comment.sh`/`tracker-transition.sh` invocation) — it's never
+  written to disk or cached, so as long as you stay logged in, it keeps working with no further
+  action from you. By default it tries every browser it can find and uses whichever has a working
+  Jira session; to pin one specific browser instead, set `JIRA_COOKIE_BROWSER=chrome` (or
+  `firefox`, `edge`, `brave`, ...) in `.ai/intake.config` (step 3) for normal runs, or as a one-off
+  env var prefix (e.g. `JIRA_COOKIE_BROWSER=firefox ai-intake-harness/install.sh --test-cookie`)
+  when testing — `install.sh` runs before `.ai/intake.config` necessarily exists, so it doesn't
+  read that file.
+- **Requires a real desktop login session** — it reads the OS keyring (GNOME Keyring/KWallet) to
+  decrypt Chrome's cookie store, so this doesn't work on a headless box with no browser/desktop
+  session on it. If your browser session itself ever fully expires, the harness fails loudly
+  (rather than silently doing nothing) telling you to log into Jira in your browser again — there's
+  no way for it to safely log back in on its own.
+- **Test this path specifically** — even with a valid token already configured, to confirm the
+  fallback actually works before you rely on it:
+  ```bash
+  ai-intake-harness/install.sh --test-cookie
+  ```
+  This forces cookie auth for that one check (ignoring any token in `.env.local`) and reports which
+  account it connected as and which mode it used, e.g.
+  `OK — connected to https://your-site.atlassian.net as Your Name (auth: cookie).`
+
+See `.ai/plans/active/jira-cookie-auth-fallback.md` for the full design and its trade-offs (in
+short: this mode needs an actively logged-in desktop browser session, a real departure from "runs
+unattended" — use the API token whenever you can get one).
 
 ### 3. Create `.ai/intake.config` in your repo
 
@@ -96,6 +132,14 @@ TRACKER=jira                    # or jira-tags, github, or your custom tracker a
 TRACKER_PROJECT_KEY=MYPROJ      # your tracker's project identifier
 # TRACKER_APP_TAG=app:my-app-name-1   # required only for TRACKER=jira-tags — see below
 # TRACKER_GATE_COMMENTS=true          # TRACKER=jira-tags only; default false (comments ungated) — see below
+# TRACKER_NATIVE_STATUS_IN_PROGRESS=In Development   # TRACKER=jira-tags only; this project's board
+#                                      # column name for "actively being worked" (default "In Progress")
+# TRACKER_NATIVE_STATUS_CODE_REVIEW=Code Review      # TRACKER=jira-tags only; this project's board
+#                                      # column name for "ready for review" (default "Code Review")
+# JIRA_COOKIE_BROWSER=chrome          # only relevant if you're using the cookie auth fallback
+#                                      # (no API token — see step 2) and want to pin one browser;
+#                                      # install.sh doesn't read this file, so pass it as an env
+#                                      # var prefix instead when testing with --test-cookie
 PROJECT_ADAPTER=my-stack        # selects scripts/lib/project/my-stack.sh in YOUR repo
 PROJECT_DB_PREFIX=mydb          # database name prefix for worktrees (e.g., mydb_feature_1_...)
 ```
@@ -163,9 +207,9 @@ intake-plan:
 
 ### 6. Set up the cron poller
 
-Create a small wrapper script for cron — the harness does **not** ship one, because the wrapper
-holds host-specific credentials (Claude auth) and paths. Keep it out of git (gitignore whatever
-you name it, e.g. `scripts/intake-cron.sh`):
+`ai-intake-harness/install.sh` (step 2) already scaffolded `scripts/intake-cron.sh` for you from
+the template below — the harness doesn't ship this file itself, because it holds host-specific
+credentials (Claude auth) and paths, so it's gitignored and created locally on first run instead:
 
 ```bash
 # intake-cron.sh (consumer-created, gitignored; chmod +x)
@@ -176,11 +220,15 @@ cd /path/to/repo
 exec /usr/bin/flock -n .intake/poll.lock bash ai-intake-harness/intake-poll.sh
 ```
 
-Then add a crontab entry (e.g., every 2 minutes) — `ai-intake-harness/install.sh` (step 2) already
-printed this for you with your repo's actual path filled in:
+Edit it to fix the `ANTHROPIC_API_KEY` line (or swap in `CLAUDE_CODE_OAUTH_TOKEN`), then add the
+crontab entry (e.g., every 2 minutes) — `install.sh` already printed this for you with your repo's
+actual path filled in, or install it directly:
 ```bash
+ai-intake-harness/install.sh --install-cron
+# or add it yourself via 'crontab -e':
 */2 * * * * /path/to/repo/scripts/intake-cron.sh >> /path/to/repo/.intake/poll.log 2>&1
 ```
+`--install-cron` is idempotent — safe to re-run, it skips if the entry's already there.
 
 (The `flock` in the wrapper guarantees concurrent runs don't collide. Because the wrapper is
 host-only and gitignored, renaming harness scripts never updates it — re-check it after renames.)
@@ -236,8 +284,14 @@ Implement these shell functions:
 - **`tracker_abstract_state <ctx-file>`** — given an already-fetched `tracker_get_issue` JSON file, echo the ticket's abstract state name (same vocabulary as `tracker_transition`'s states, plus `ready-for-planning`), or `""` if it's outside the pipeline. Maps whatever this tracker's own status/label vocabulary is onto the abstract one, so tracker-agnostic worker prompts (e.g. `prompts/intake-planning.md`) never need to know which tracker is configured. No extra REST call — reads from the file the poller already wrote.
 
 **Built-in adapters:**
-- `lib/tracker/jira.sh` — Jira Cloud REST, single API-token account, native Jira status field drives the workflow.
+- `lib/tracker/jira.sh` — Jira Cloud REST, single account, native Jira status field drives the workflow.
 - `lib/tracker/jira-tags.sh` — Jira Cloud REST for one **shared project used by multiple repos**. Each repo/install is assigned a unique `TRACKER_APP_TAG` (e.g. `app:my-app-name-1`) that scopes every query to just that repo's tickets, and the workflow is driven by `state:<step>` labels instead of the status field (useful when the real status field is too coarse, or the board is locked down). Every query and state-changing write is additionally scoped to tickets assigned to the authenticated account, since the shared project may have multiple users. Comments are the one exception: they're ungated by default (`TRACKER_GATE_COMMENTS=false`) so a worker can always report back — even on a ticket reassigned out from under it mid-flight — set `TRACKER_GATE_COMMENTS=true` to gate them too. See `docs/workflow-and-triggers.md` ("Tag-based workflow") for the required `state:*` labels and who sets each one, and `.ai/plans/completed/jira-tags-tracker-adapter.md` for the full design.
+
+Both adapters authenticate the same way, via shared `lib/tracker/jira-common.sh` plumbing: an API
+token (`JIRA_INTAKE_EMAIL` + `JIRA_INTAKE_API_TOKEN`) if you have one, otherwise a browser session
+cookie extracted fresh from the local machine on every run (`lib/tracker/jira-cookie.sh`, for
+accounts that can't get a token issued) — see "Quickstart" step 2 and
+`.ai/plans/active/jira-cookie-auth-fallback.md`.
 
 ### Project adapter: `scripts/lib/project/<name>.sh`
 

@@ -13,11 +13,14 @@
 #   - ai-intake-harness/tracker-comment.sh   (worktree workers posting their own results)
 #   - ai-intake-harness/tracker-transition.sh
 #
-# All Jira I/O goes through the personal API token (single-account model). Required env,
-# loaded from .env / .env.local by tracker_load_env (see lib/tracker/jira-common.sh):
+# All Jira I/O goes through one personal account (single-account model), authenticated either with
+# an API token or, if no token is configured, a browser session cookie (see
+# lib/tracker/jira-common.sh / lib/tracker/jira-cookie.sh and
+# .ai/plans/active/jira-cookie-auth-fallback.md). Required env, loaded from .env / .env.local by
+# tracker_load_env:
 #   JIRA_SITE_URL=https://your-site.atlassian.net
-#   JIRA_INTAKE_EMAIL=you@your-domain
-#   JIRA_INTAKE_API_TOKEN=...
+# plus JIRA_INTAKE_EMAIL + JIRA_INTAKE_API_TOKEN (API-token auth) or, if those are left unset, the
+# harness falls back to extracting a session cookie from the local browser.
 #
 # Search uses REST v3 (/search/jql); read/comment/transition use v2 (plain-text comment
 # bodies — no ADF construction needed). Transitions resolve by TARGET status name, which is
