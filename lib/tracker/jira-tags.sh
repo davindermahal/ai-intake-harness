@@ -17,8 +17,10 @@
 #     jira.sh: tracker_transition has no `ready-for-implementation` case, so the automation can
 #     never perform that transition regardless of what the legal-move table would allow.
 #
-# Required env (see jira-common.sh's jira_common_load_env): JIRA_SITE_URL, JIRA_INTAKE_EMAIL,
-# JIRA_INTAKE_API_TOKEN.
+# Required env (see jira-common.sh's jira_common_load_env): JIRA_SITE_URL, plus either
+# JIRA_INTAKE_EMAIL + JIRA_INTAKE_API_TOKEN (API-token auth) or, if those are unset, a browser
+# session cookie fallback (see lib/tracker/jira-cookie.sh and
+# .ai/plans/active/jira-cookie-auth-fallback.md).
 # Required config (.ai/intake.config): TRACKER_PROJECT_KEY, TRACKER_APP_TAG.
 # Optional config: TRACKER_GATE_COMMENTS=true to also assignee-gate tracker_add_comment (default:
 # false — see the module comment on tracker_add_comment for why comments are ungated by default).
