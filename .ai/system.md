@@ -16,7 +16,8 @@ report back**, driven by a background **poller** (`intake-poll.sh`) fired from c
   concurrency, dispatches workers, sweeps in-progress work (watchdog). No tracker/stack/AI
   knowledge.
 - **Tracker adapter** (`lib/tracker/<name>.sh`) — one per issue tracker. Built-in: `jira.sh`
-  (Jira Cloud, full REST, single API-token account). Contract: `tracker_load_env`,
+  (Jira Cloud, full REST, single account — API token, or a browser session cookie fallback for
+  accounts that can't get a token issued). Contract: `tracker_load_env`,
   `tracker_search`, `tracker_get_issue`, `tracker_add_comment`, `tracker_transition`,
   `tracker_ticket_regex`.
 - **Project adapter** (`scripts/lib/project/<name>.sh`, lives in the *consumer* repo, not here) —

@@ -13,6 +13,12 @@
 #      (with instructions) if it still looks like the unfilled template. Re-run this script (or
 #      pass --test-only) after filling in .env.local to run just the connectivity check.
 #
+# Auth: an API token (JIRA_INTAKE_EMAIL + JIRA_INTAKE_API_TOKEN) if you have one, otherwise a
+# browser session cookie extracted from a local Chrome/Firefox login — see .env.local.dist and
+# .ai/plans/active/jira-cookie-auth-fallback.md. Pass --test-cookie instead of --test-only to
+# specifically verify the cookie path works, regardless of what's currently in .env.local (useful
+# even when a valid token is already configured — see that plan's decision #6).
+#
 # REPO_ROOT defaults to the consumer repo root (one level above this harness's own directory, per
 # the git-subtree layout above). Pass an explicit path as the first argument to override — e.g.
 # `./install.sh .` when running this from within a standalone checkout of the harness itself
@@ -22,10 +28,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TEST_ONLY=0
+TEST_COOKIE=0
 REPO_ROOT_ARG=""
 for arg in "$@"; do
     case "$arg" in
         --test-only) TEST_ONLY=1 ;;
+        --test-cookie) TEST_ONLY=1; TEST_COOKIE=1 ;;
         *) REPO_ROOT_ARG="$arg" ;;
     esac
 done
@@ -45,6 +53,9 @@ if [ "$TEST_ONLY" -eq 0 ]; then
     fi
     echo "    Edit it now and fill in JIRA_SITE_URL, JIRA_INTAKE_EMAIL, JIRA_INTAKE_API_TOKEN"
     echo "    (a Jira API token: https://id.atlassian.com/manage-profile/security/api-tokens)."
+    echo "    No API token available? Leave JIRA_INTAKE_EMAIL/JIRA_INTAKE_API_TOKEN blank instead —"
+    echo "    see .env.local.dist for the browser-cookie fallback (needs"
+    echo "    'pip install browser_cookie3' and a logged-in Jira session in your browser here)."
     echo "    Also create $REPO_ROOT/.ai/intake.config with TRACKER, TRACKER_PROJECT_KEY, and"
     echo "    (for TRACKER=jira-tags) TRACKER_APP_TAG — see README.md \"Quickstart\" step 2."
     echo
@@ -55,13 +66,17 @@ if [ "$TEST_ONLY" -eq 0 ]; then
     echo
 fi
 
-echo "==> Testing Jira connectivity with $ENV_LOCAL ..."
+if [ "$TEST_COOKIE" -eq 1 ]; then
+    echo "==> Testing Jira connectivity via the browser-cookie fallback (forced, ignoring any"
+    echo "    API token in $ENV_LOCAL) ..."
+else
+    echo "==> Testing Jira connectivity with $ENV_LOCAL ..."
+fi
 if [ ! -f "$ENV_LOCAL" ] && [ ! -f "$REPO_ROOT/.env" ]; then
     echo "    No .env or .env.local at $REPO_ROOT yet — nothing to test."
     exit 0
 fi
-if grep -q '^JIRA_SITE_URL=https://your-site.atlassian.net$' "$ENV_LOCAL" 2>/dev/null \
-    || grep -q '^JIRA_INTAKE_API_TOKEN=your-api-token-here$' "$ENV_LOCAL" 2>/dev/null; then
+if [ "$TEST_COOKIE" -eq 0 ] && grep -q '^JIRA_SITE_URL=https://your-site.atlassian.net$' "$ENV_LOCAL" 2>/dev/null; then
     echo "    $ENV_LOCAL still has placeholder values — fill it in, then re-run:"
     echo "      $SCRIPT_DIR/install.sh --test-only${REPO_ROOT_ARG:+ $REPO_ROOT_ARG}"
     exit 0
@@ -69,17 +84,18 @@ fi
 
 # shellcheck source=lib/tracker/jira-common.sh
 . "$SCRIPT_DIR/lib/tracker/jira-common.sh"
+
+if [ "$TEST_COOKIE" -eq 1 ]; then
+    export JIRA_AUTH_MODE=cookie
+    if ! jira_cookie_available; then
+        echo "    FAILED: browser-cookie fallback isn't usable — see error above." >&2
+        exit 1
+    fi
+fi
+
 if ! jira_common_load_env "$REPO_ROOT"; then
-    echo "    FAILED: could not load Jira credentials from $ENV_LOCAL — see error above." >&2
+    echo "    FAILED: could not connect to Jira — see error above." >&2
     exit 1
 fi
 
-resp="$(jira_api GET /rest/api/2/myself)"
-if echo "$resp" | jq -e 'has("accountId")' >/dev/null 2>&1; then
-    name="$(echo "$resp" | jq -r '.displayName // .emailAddress // .accountId')"
-    echo "    OK — connected to $JIRA_SITE_URL as $name."
-else
-    echo "    FAILED: Jira did not return a valid account. Response:" >&2
-    echo "$resp" | jq -c '.' >&2 2>/dev/null || echo "$resp" >&2
-    exit 1
-fi
+echo "    OK — connected to $JIRA_SITE_URL as $(jira_myself_display_name) (auth: $(jira_auth_mode))."
