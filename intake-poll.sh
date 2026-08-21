@@ -74,7 +74,10 @@
 #   CLAUDE_BIN=claude                        claude CLI binary (all real ai_* adapters use it) (default: claude)
 #   CLAUDE_FLAGS="--permission-mode acceptEdits"   flags for headless runs
 #   CLAUDE_TIMEOUT=900                       seconds before a claude planning run is killed
-#   AI_PROVIDER=claude|openai|local-llm      which ai_* adapter drives dispatches (default: claude)
+#   GEMINI_BIN=gemini                        gemini CLI binary (ai/gemini.sh) (default: gemini)
+#   GEMINI_FLAGS=""                          flags for headless gemini planning runs
+#   GEMINI_TIMEOUT=900                       seconds before a gemini planning run is killed
+#   AI_PROVIDER=claude|openai|local-llm|gemini   which ai_* adapter drives dispatches (default: claude)
 #   AI_PLANNING_MODEL=...                    --model for planning runs (default: empty = CLI default)
 #   AI_IMPLEMENTATION_MODEL=...              --model for implementation runs (default: empty = CLI default)
 #   AI_LOCAL_LLM_TIMEOUT=3600                planning kill timeout when the resolved provider is
@@ -106,6 +109,9 @@ DRY_RUN="${DRY_RUN:-0}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 CLAUDE_FLAGS="${CLAUDE_FLAGS:---permission-mode acceptEdits}"
 CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-900}"
+GEMINI_BIN="${GEMINI_BIN:-gemini}"
+GEMINI_FLAGS="${GEMINI_FLAGS:-}"
+GEMINI_TIMEOUT="${GEMINI_TIMEOUT:-900}"
 INFLIGHT_STALE_SECONDS="${INFLIGHT_STALE_SECONDS:-1800}"
 JIRA_MAX_WORKTREES="${JIRA_MAX_WORKTREES:-2}"      # max simultaneous implementation workers
 JIRA_RUN_STALE_SECONDS="${JIRA_RUN_STALE_SECONDS:-14400}"  # reclaim a hung worker after ~4h

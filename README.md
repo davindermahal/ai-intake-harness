@@ -197,6 +197,13 @@ Example (for a Node/Docker setup):
 }
 ```
 
+For Gemini (`AI_PROVIDER=gemini`), write `.gemini/settings.<adapter-name>.json` instead, using
+Gemini's `coreTools`/`excludeTools` schema to restrict tool categories (e.g. exclude
+`run_shell_command` entirely, or scope `coreTools` to only the specific tools your build/verify
+flow needs). Gemini's model is coarser than Claude's per-command allow/deny — there's no
+equivalent of denying `Bash(git push:*)` specifically while allowing other shell commands; you're
+choosing whole tool categories on or off.
+
 ---
 
 ## Adapter contracts
@@ -224,6 +231,32 @@ Implement these shell functions (documented above):
 - `project_test <container>`
 - `project_verify <port>`
 - `project_permission_profile`
+- `project_gemini_permission_profile` *(optional — only required to select `AI_PROVIDER=gemini`
+  for the implementation phase)*. Echoes the path to a Gemini-schema (`coreTools`/`excludeTools`)
+  settings file — see "AI provider adapter" below.
+
+### AI provider adapter: `lib/ai/<name>.sh`
+
+Implement these shell functions:
+
+- **`ai_load_env`** — validate the CLI/credentials this provider needs are present. Fail loudly
+  (non-zero exit, message to stderr) rather than deferring to a confusing failure mid-run.
+- **`ai_run_planning <key> <branch> <ctx-file> <decision-file> <worktree-dir>`** — run the
+  planning routine headlessly inside the given worktree.
+- **`ai_run_implementation <logfile> <pidfile>`** — launch a DETACHED headless implementation
+  worker, writing its PID to `<pidfile>`.
+
+**Built-in adapters:** `lib/ai/claude.sh` (Claude Code CLI, default, fully working — both
+phases; automation boundary via a curated per-command allow/deny `--settings` profile, see
+`project_permission_profile`) · `lib/ai/gemini.sh` (Gemini CLI, fully working — both phases;
+automation boundary via `--sandbox` + `--approval-mode yolo` + a tool-*category*-level
+`coreTools`/`excludeTools` settings file, see `project_gemini_permission_profile` — coarser-grained
+than Claude's, an accepted trade-off, see `docs/design-decisions.md` #5) · `lib/ai/local-llm.sh`
+(routes the claude CLI at a local model server — experimental) · `lib/ai/openai.sh` (stub, fails
+loudly).
+
+Selection: `AI_PROVIDER` in `.ai/intake.config` (default `claude`), overridable per-ticket via a
+tracker label — see `intake-poll.sh`'s `resolve_ai_profile`.
 
 ---
 
@@ -252,7 +285,11 @@ Implement these shell functions (documented above):
 
 ## Future directions (non-goals for v1)
 
-- **Multi-AI abstraction.** Today planning/implementation is hard-coded to `claude` (Claude Code CLI). The name `ai-intake-harness` anticipates future support for other AI providers (Gemini, OpenAI, local LLMs), but that requires a third adapter seam (`ai_invoke`/`ai_launch`) — design pending a second real consumer.
+- **Fine-grained Gemini permissions.** `lib/ai/gemini.sh` covers both phases, but its
+  implementation-phase automation boundary is tool-*category*-level (`coreTools`/`excludeTools`),
+  coarser than Claude's per-command allow/deny — porting Claude's exact granularity to Gemini
+  would require the Gemini CLI to grow an equivalent mechanism first. `lib/ai/openai.sh` remains a
+  stub entirely.
 - **GitHub Issues tracker adapter.** Deferred until a second real tracker consumer exists to design against; not yet built.
 
 ---
