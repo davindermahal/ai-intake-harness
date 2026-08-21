@@ -98,6 +98,12 @@ instructions are not a security boundary; a permission sandbox is.
 
 **Trade-offs.** A human must always do the final push/merge/deploy. Intended.
 
+The Gemini provider (see DAV-2) approximates this boundary with coarser tools —
+`--sandbox` + `--approval-mode yolo` + a tool-category `coreTools`/`excludeTools` settings file,
+rather than Claude's per-command allow/deny. This gap is explicit and author-accepted, not
+accidental; `lib/ai/gemini.sh` refuses to launch at all rather than run unrestricted when no
+settings file is configured.
+
 ---
 
 ## 6. Isolation via per-ticket worktree + container + fresh database
@@ -201,6 +207,8 @@ existing behavior.
 **Trade-offs.** A stubbed provider that only fails is dead weight until implemented, and the local-LLM
 path's full agentic behavior was not verified end-to-end from a host that can reach the local model
 (flagged in-code). In exchange, the architecture is provider-ready and per-ticket selection works now.
+A second real provider (Gemini, both planning and implementation phases) has since landed — see
+DAV-2.
 
 > TODO: The decision to make provider (but not model) label-overridable references a completed design
 > note in the consumer repo; the full rationale for keeping the model config-only lives there and is

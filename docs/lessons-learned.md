@@ -111,4 +111,8 @@ memory; they are integration lessons more than harness-code bugs:
   actually reach the local model; the design flags a possible fallback to a planning-only, non-agentic
   mode if tool-use translation proves unreliable for a given local model.
 - The **OpenAI provider is a stub** that fails loudly; its real integration was deferred to a follow-up.
+- The **Gemini provider** supports both phases, but its implementation-phase automation boundary
+  is tool-*category*-level (`--sandbox` + `--approval-mode yolo` + `coreTools`/`excludeTools`),
+  coarser than Claude's per-command allow/deny (design decision #5) — an explicit, author-accepted
+  trade-off, not a gap to silently work around. See `lib/ai/gemini.sh`'s header comment.
 - A **GitHub Issues tracker adapter** is anticipated but not yet built.

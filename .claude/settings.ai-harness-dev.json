@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Read", "Edit", "Write", "Glob", "Grep",
+      "Bash(shellcheck:*)",
+      "Bash(bash -n:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git log:*)",
+      "Bash(./tracker-comment.sh:*)",
+      "Bash(./tracker-transition.sh:*)"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(git reset:*)",
+      "Bash(git checkout:*)",
+      "Bash(git rebase:*)",
+      "Read(.env)",
+      "Read(.env.local)"
+    ]
+  }
+}
