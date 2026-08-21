@@ -188,3 +188,14 @@ tracker_transition_to_status() {
 tracker_ticket_regex() {
     printf '%s' "${TRACKER_PROJECT_KEY}-[0-9]+"
 }
+
+# tracker_abstract_state CTX_FILE — same contract as jira.sh's function of the same name, reading
+# from an already-fetched tracker_get_issue JSON file (no extra REST call): the state:* label IS
+# the abstract state here, so this is a straight extraction rather than a status-name mapping.
+# Lenient on purpose (unlike jira_tags_current_state, which is a write-path precondition and
+# errors on zero/multiple labels) — a worker-prompt eligibility check should degrade to "" rather
+# than fail outright on a data-integrity edge case; echoes the first match if more than one somehow
+# exists.
+tracker_abstract_state() {
+    jq -r '.fields.labels[]? | select(startswith("state:")) | sub("^state:";"")' "$1" | head -1
+}

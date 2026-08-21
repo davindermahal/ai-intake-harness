@@ -62,7 +62,7 @@ Backlog → Selected → Ready for Planning → Needs Author Input ⇄ Ready for
 ```
 
 - **Core engine** (`intake-poll.sh`) — polls abstract queues, manages state transitions, dispatches workers. No knowledge of which tracker or which project.
-- **Tracker adapter** (`lib/tracker/<name>.sh`) — implementation for a specific issue tracker (Jira Cloud, GitHub Issues, etc.). Exports: `tracker_load_env`, `tracker_search`, `tracker_get_issue`, `tracker_add_comment`, `tracker_transition`, `tracker_ticket_regex`.
+- **Tracker adapter** (`lib/tracker/<name>.sh`) — implementation for a specific issue tracker (Jira Cloud, GitHub Issues, etc.). Exports: `tracker_load_env`, `tracker_search`, `tracker_get_issue`, `tracker_add_comment`, `tracker_transition`, `tracker_ticket_regex`, `tracker_abstract_state`.
 - **Project adapter** (`scripts/lib/project/<name>.sh` in your consumer repo) — implementation for your stack (Symfony+Docker, Rails, Node, etc.). Exports: `project_derive_names`, `project_install_deps`, `project_provision_fresh`, `project_build`, `project_test`, `project_verify`, `project_permission_profile`.
 
 ---
@@ -233,10 +233,11 @@ Implement these shell functions:
 - **`tracker_add_comment <key> <text>`** — post a comment to the ticket. Text may span lines.
 - **`tracker_transition <key> <state>`** — transition the ticket to an abstract state. States: `needs-author-input`, `plan-review`, `ready-for-implementation`, `in-progress`, `ready-for-verification`, `done`.
 - **`tracker_ticket_regex`** — echo a regex pattern to extract ticket keys from branch names (e.g., `PROJ-[0-9]+` for Jira).
+- **`tracker_abstract_state <ctx-file>`** — given an already-fetched `tracker_get_issue` JSON file, echo the ticket's abstract state name (same vocabulary as `tracker_transition`'s states, plus `ready-for-planning`), or `""` if it's outside the pipeline. Maps whatever this tracker's own status/label vocabulary is onto the abstract one, so tracker-agnostic worker prompts (e.g. `prompts/intake-planning.md`) never need to know which tracker is configured. No extra REST call — reads from the file the poller already wrote.
 
 **Built-in adapters:**
 - `lib/tracker/jira.sh` — Jira Cloud REST, single API-token account, native Jira status field drives the workflow.
-- `lib/tracker/jira-tags.sh` — Jira Cloud REST for one **shared project used by multiple repos**. Each repo/install is assigned a unique `TRACKER_APP_TAG` (e.g. `app:my-app-name-1`) that scopes every query to just that repo's tickets, and the workflow is driven by `state:<step>` labels instead of the status field (useful when the real status field is too coarse, or the board is locked down). Every query and state-changing write is additionally scoped to tickets assigned to the authenticated account, since the shared project may have multiple users. Comments are the one exception: they're ungated by default (`TRACKER_GATE_COMMENTS=false`) so a worker can always report back — even on a ticket reassigned out from under it mid-flight — set `TRACKER_GATE_COMMENTS=true` to gate them too. See `.ai/plans/completed/jira-tags-tracker-adapter.md` for the full design.
+- `lib/tracker/jira-tags.sh` — Jira Cloud REST for one **shared project used by multiple repos**. Each repo/install is assigned a unique `TRACKER_APP_TAG` (e.g. `app:my-app-name-1`) that scopes every query to just that repo's tickets, and the workflow is driven by `state:<step>` labels instead of the status field (useful when the real status field is too coarse, or the board is locked down). Every query and state-changing write is additionally scoped to tickets assigned to the authenticated account, since the shared project may have multiple users. Comments are the one exception: they're ungated by default (`TRACKER_GATE_COMMENTS=false`) so a worker can always report back — even on a ticket reassigned out from under it mid-flight — set `TRACKER_GATE_COMMENTS=true` to gate them too. See `docs/workflow-and-triggers.md` ("Tag-based workflow") for the required `state:*` labels and who sets each one, and `.ai/plans/completed/jira-tags-tracker-adapter.md` for the full design.
 
 ### Project adapter: `scripts/lib/project/<name>.sh`
 
