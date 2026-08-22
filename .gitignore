@@ -13,8 +13,13 @@
 /.ai/intake.config
 /.ai/prompts/
 /scripts/
-/Makefile
 /.claude/settings.ai-harness-dev.json
+# NOTE: /Makefile is deliberately NOT listed here (unlike the dogfooding files above) — it now
+# holds this repo's own lint/test/test-live targets (see .ai/plans/active/2026-08-21-test-suite-
+# plan.md), committed so CI can run `make test`/`make lint` against a fresh checkout. It carries no
+# self-hosted worktree-go/worktree-new/etc targets (those stay consumer-owned, per README.md's
+# "Wire up the Makefile"), so vendoring it via git subtree into a consumer's ai-intake-harness/
+# subdirectory is harmless — it never collides with the consumer's own root Makefile.
 
 # Python (lib/tracker/jira_cookie_extract.py)
 __pycache__/

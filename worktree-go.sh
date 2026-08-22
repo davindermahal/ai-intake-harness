@@ -146,7 +146,8 @@ if [ "$RESUME" != "1" ]; then
     # 5. start container (reuses the project image built by the project adapter; mounts this worktree)
     echo "==> Starting app container ${APP_CONTAINER}..."
     export USER_ID GROUP_ID APP_CONTAINER APP_PORT="$PORT" XDEBUG_PORT POSTGRES_DB="$DB_NAME"
-    export COMPOSER_HOME="$(composer config --global home 2>/dev/null || echo "${HOME}/.composer")"
+    COMPOSER_HOME="$(composer config --global home 2>/dev/null || echo "${HOME}/.composer")"
+    export COMPOSER_HOME
     wt_start_container "$REPO_ROOT" "$WORKTREE_DIR" "$PROJECT_NAME"
 
     # 6. wait

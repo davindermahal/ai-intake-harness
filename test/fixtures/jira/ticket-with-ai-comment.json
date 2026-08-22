@@ -1,0 +1,17 @@
+{
+  "key": "PROJ-2",
+  "fields": {
+    "summary": "Fix flaky checkout test",
+    "status": {"name": "In Progress"},
+    "description": "The checkout test flakes under load.",
+    "labels": [],
+    "comment": {
+      "comments": [
+        {
+          "created": "2026-08-21T10:00:00.000+0000",
+          "body": "Investigated but could not reproduce locally.\n\n----\n🤖 _Posted by Claude (JIRA intake automation)_"
+        }
+      ]
+    }
+  }
+}
