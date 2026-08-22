@@ -19,8 +19,10 @@ a new adapter, not changing the core.
 
 ### Tracker adapter
 The adapter that knows how to talk to a specific issue tracker — search a queue, read a ticket, post a
-comment, change a ticket's status, and recognize ticket ids in branch names. A built-in adapter
-targets a hosted Jira instance over REST.
+comment, change a ticket's status, and recognize ticket ids in branch names. Two built-in adapters
+target a hosted Jira instance over REST: one uses the project's native status field as the state
+machine, the other (`jira-tags`) represents state as labels for a Jira project shared across
+multiple repos (see `README.md`'s `TRACKER=` config and `.ai/repo-map.md`).
 
 ### Project adapter
 The adapter, living in the *consumer's* own repository, that knows how to work with a specific tech

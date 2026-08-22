@@ -29,7 +29,7 @@
 #                          poller sets RESUME=1 when the worktree already exists. Under HEADLESS an
 #                          existing worktree auto-resumes even without the flag; the interactive
 #                          (non-HEADLESS) guard still hard-errors on an existing dir. (default: 0)
-#   PROVIDER=claude|openai|local-llm   override AI_PROVIDER for this implementation run only
+#   PROVIDER=claude|codex|antigravity|local-llm|gemini   override AI_PROVIDER for this implementation run only
 #   MODEL=...              override AI_IMPLEMENTATION_MODEL (--model) for this run only
 #   PROFILE=<name>         resolve an AI_PROFILE_<name>="provider:model" entry from
 #                          .ai/intake.config into PROVIDER+MODEL for this run (explicit
@@ -134,7 +134,7 @@ if [ "$RESUME" != "1" ]; then
 
     # 3. database — create empty before the container boots so Symfony can connect
     echo "==> Creating database ${DB_NAME}..."
-    wt_create_empty_db "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD"
+    wt_create_empty_db "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$SOURCE_DB"
     if [ "$SEED" = "clone" ]; then
         echo "==> Cloning ${SOURCE_DB} → ${DB_NAME}..."
         wt_clone_db "$SOURCE_DB" "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD"

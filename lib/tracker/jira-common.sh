@@ -12,7 +12,7 @@
 #                                                    lib/tracker/jira-cookie.sh — for accounts that
 #                                                    can't get an API token issued)
 #
-# See .ai/plans/active/jira-cookie-auth-fallback.md for the full design and its trade-offs.
+# See .ai/plans/completed/jira-cookie-auth-fallback.md for the full design and its trade-offs.
 #
 # Credential resolution is isolated behind jira_auth_curl_opts, which is exactly the seam that let
 # the cookie fallback be added without touching jira_api's callers.
@@ -53,7 +53,7 @@ jira_common_load_env() {
     command -v curl >/dev/null || { echo "tracker/jira: curl not found" >&2; return 1; }
 
     # Auth-mode resolution: JIRA_AUTH_MODE forces a mode (testing/verification only — see
-    # .ai/plans/active/jira-cookie-auth-fallback.md decision #6, e.g. `install.sh --test-cookie`).
+    # .ai/plans/completed/jira-cookie-auth-fallback.md decision #6, e.g. `install.sh --test-cookie`).
     # Otherwise: a full email+token pair means API-token auth; anything less falls back to cookie
     # auth.
     if [ -n "${JIRA_AUTH_MODE:-}" ]; then
@@ -150,20 +150,45 @@ jira_api() {
 }
 
 # jira_search_jql JQL — echoes one issue key per line. Internal helper (raw JQL); each adapter's
-# tracker_search translates its own abstract queue into JQL before calling this.
+# tracker_search translates its own abstract queue into JQL before calling this. Pages through
+# the full result set via nextPageToken (50 results/request) instead of silently truncating at
+# the first page — a queue with more than 50 matching tickets used to lose everything past the
+# 50th-oldest with no indication anything was cut off. A generous page-count cap guards against an
+# API change turning this into an infinite loop.
 jira_search_jql() {
-    local jql="$1" resp
-    resp="$(curl -sS "${_JIRA_AUTH_OPTS[@]}" \
-        -G "$JIRA_SITE_URL/rest/api/3/search/jql" \
-        --data-urlencode "jql=$jql" \
-        --data-urlencode "fields=key" \
-        --data-urlencode "maxResults=50" \
-        -H "Accept: application/json")" || { echo "tracker/jira: search request failed" >&2; return 1; }
-    if echo "$resp" | jq -e 'has("errorMessages") and (.errorMessages | length > 0)' >/dev/null 2>&1; then
-        echo "tracker/jira: search error: $(echo "$resp" | jq -r '.errorMessages | join("; ")')" >&2
-        return 1
-    fi
-    echo "$resp" | jq -r '.issues[]?.key'
+    local jql="$1" resp next_token="" args pages=0
+    while :; do
+        pages=$((pages + 1))
+        if [ "$pages" -gt 200 ]; then
+            echo "tracker/jira: search paged 200 times (10000+ issues) without exhausting nextPageToken — stopping; check the JQL" >&2
+            return 1
+        fi
+        args=(-G "$JIRA_SITE_URL/rest/api/3/search/jql" \
+              --data-urlencode "jql=$jql" \
+              --data-urlencode "fields=key" \
+              --data-urlencode "maxResults=50" \
+              -H "Accept: application/json")
+        [ -n "$next_token" ] && args+=(--data-urlencode "nextPageToken=$next_token")
+        resp="$(curl -sS "${_JIRA_AUTH_OPTS[@]}" "${args[@]}")" || { echo "tracker/jira: search request failed" >&2; return 1; }
+        if echo "$resp" | jq -e 'has("errorMessages") and (.errorMessages | length > 0)' >/dev/null 2>&1; then
+            echo "tracker/jira: search error: $(echo "$resp" | jq -r '.errorMessages | join("; ")')" >&2
+            return 1
+        fi
+        echo "$resp" | jq -r '.issues[]?.key'
+        next_token="$(echo "$resp" | jq -r '.nextPageToken // empty')"
+        [ -n "$next_token" ] || break
+    done
+}
+
+# jira_project_statuses PROJECT_KEY — echoes every distinct status name configured anywhere in
+# PROJECT_KEY's workflow (across all its issue types), one per line. Read-only (a single GET).
+# Used by install.sh --verify to confirm a tracker adapter's abstract-state -> literal-status-name
+# mapping (hardcoded in jira.sh's tracker_transition, or configured via jira-tags.sh's
+# TRACKER_NATIVE_STATUS_*) actually corresponds to real statuses on this project's board — a typo
+# or a renamed board column otherwise only surfaces the first time the poller attempts that one
+# specific transition.
+jira_project_statuses() {
+    jira_api GET "/rest/api/2/project/$1/statuses" | jq -r '.[].statuses[].name' | sort -u
 }
 
 # jira_myself_account_id — echoes the authenticated account's accountId, memoized for the process

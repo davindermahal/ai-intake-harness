@@ -50,7 +50,7 @@ policies block self-service Atlassian API tokens entirely, with no exception pro
 specific case, `lib/tracker/jira-common.sh` falls back to authenticating with a session cookie
 extracted fresh from the local browser on every run (`lib/tracker/jira-cookie.sh`) instead of
 `JIRA_INTAKE_EMAIL`/`JIRA_INTAKE_API_TOKEN` — see
-`.ai/plans/active/jira-cookie-auth-fallback.md`. This is a real, accepted departure from "runs
+`.ai/plans/completed/jira-cookie-auth-fallback.md`. This is a real, accepted departure from "runs
 unattended on a build host," scoped narrowly on purpose: it only engages when no token is
 configured (an API token stays the default and recommended path whenever one can be issued); a
 session cookie is bearer-equivalent to the full logged-in human (broader access than a scoped
@@ -112,11 +112,30 @@ instructions are not a security boundary; a permission sandbox is.
 
 **Trade-offs.** A human must always do the final push/merge/deploy. Intended.
 
-The Gemini provider (see DAV-2) approximates this boundary with coarser tools —
-`--sandbox` + `--approval-mode yolo` + a tool-category `coreTools`/`excludeTools` settings file,
-rather than Claude's per-command allow/deny. This gap is explicit and author-accepted, not
-accidental; `lib/ai/gemini.sh` refuses to launch at all rather than run unrestricted when no
-settings file is configured.
+The Gemini provider (see DAV-2, and the live-verification fixes plan) approximates this boundary
+with coarser tools — `--sandbox` + `--approval-mode yolo` + `--skip-trust` (the last required
+alongside `yolo`: an untrusted worktree — every fresh one — otherwise silently downgrades approval
+back to interactive and hangs headless) + a tool-category `coreTools`/`excludeTools` settings file
+auto-discovered at `.gemini/settings.json` (Gemini has no `--settings <path>` flag to point at an
+arbitrary file the way Claude does — confirmed live against gemini-cli 0.56.0), rather than
+Claude's per-command allow/deny. This gap is explicit and author-accepted, not accidental;
+`lib/ai/gemini.sh` refuses to launch at all rather than run unrestricted when no settings file is
+configured.
+
+The Codex provider (see `.ai/plans/completed/ai-provider-install-prompt.md`) uses `-s workspace-write
+-a never` — sandboxed filesystem writes scoped to the workspace plus sandbox-level network
+restriction (confirmed via `codex doctor` on a real install), no per-command or tool-category
+allow/deny at all. Unlike Gemini, this needs no project-supplied settings file: the boundary is a
+fixed pair of CLI flags the adapter always passes, not project-authored data, so
+`lib/ai/codex.sh` has no `project_codex_permission_profile`-style optional hook to refuse-without.
+
+The Antigravity provider (`lib/ai/antigravity.sh`, binary `agy`) uses `--sandbox
+--dangerously-skip-permissions`, the same "fixed CLI flags, no project-supplied file" shape as
+Codex. It is the *weakest-verified* boundary of the four real providers, disclosed rather than
+hidden: `--sandbox` was confirmed to exist via a live `agy --help`, but unlike Codex's `codex
+doctor` there was no equivalent diagnostic to confirm exactly what it restricts (filesystem only?
+network too?) — treat this adapter as experimental until a real implementation-phase run is
+observed.
 
 ---
 
@@ -222,7 +241,9 @@ existing behavior.
 path's full agentic behavior was not verified end-to-end from a host that can reach the local model
 (flagged in-code). In exchange, the architecture is provider-ready and per-ticket selection works now.
 A second real provider (Gemini, both planning and implementation phases) has since landed — see
-DAV-2.
+DAV-2. A third and fourth (Codex and Antigravity, both phases) have since landed too, superseding
+the stub entirely — see `.ai/plans/completed/ai-provider-install-prompt.md`; there is no longer a
+stub provider in the seam.
 
 > TODO: The decision to make provider (but not model) label-overridable references a completed design
 > note in the consumer repo; the full rationale for keeping the model config-only lives there and is

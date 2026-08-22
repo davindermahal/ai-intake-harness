@@ -10,8 +10,7 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git log:*)",
-      "Bash(./tracker-comment.sh:*)",
-      "Bash(./tracker-transition.sh:*)"
+      "Bash(./tracker-comment.sh:*)"
     ],
     "deny": [
       "Bash(git push:*)",
