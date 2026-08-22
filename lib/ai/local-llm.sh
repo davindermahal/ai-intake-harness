@@ -107,7 +107,8 @@ _ai_local_llm_load_env_impl() {
 # Studio for a Haiku model it doesn't have.
 _ai_local_llm_run_with_env() {   # _ai_local_llm_run_with_env MODEL IMPL_FN ARGS...
     local model="$1" fn="$2"; shift 2
-    ( export ANTHROPIC_BASE_URL="$(_ai_local_llm_server_root)"
+    ( local base_url; base_url="$(_ai_local_llm_server_root)"
+      export ANTHROPIC_BASE_URL="$base_url"
       export ANTHROPIC_AUTH_TOKEN="lm-studio"
       export ANTHROPIC_API_KEY="lm-studio"
       export ANTHROPIC_MODEL="$model"

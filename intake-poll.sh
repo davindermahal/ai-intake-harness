@@ -817,16 +817,21 @@ process_queue() {
 }
 
 # ----- main ---------------------------------------------------------------------------
-case "$POLL_MODE" in
-    planning)       process_queue "planning"       planning       dispatch_planning ;;
-    implementation) process_queue "implementation" implementation dispatch_implementation 1 ;;
-    watchdog)       process_watchdog ;;
-    both)
-        process_queue "planning"       planning       dispatch_planning
-        process_queue "implementation" implementation dispatch_implementation 1
-        process_watchdog
-        ;;
-    *) die "invalid POLL_MODE: $POLL_MODE (planning|implementation|watchdog|both)" ;;
-esac
+# Guarded so tests can `source` this file (e.g. to call dispatch_planning/watchdog_check
+# directly) without triggering a real poll run. No behavior change for normal invocation
+# (`bash intake-poll.sh` always has BASH_SOURCE[0] == $0).
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    case "$POLL_MODE" in
+        planning)       process_queue "planning"       planning       dispatch_planning ;;
+        implementation) process_queue "implementation" implementation dispatch_implementation 1 ;;
+        watchdog)       process_watchdog ;;
+        both)
+            process_queue "planning"       planning       dispatch_planning
+            process_queue "implementation" implementation dispatch_implementation 1
+            process_watchdog
+            ;;
+        *) die "invalid POLL_MODE: $POLL_MODE (planning|implementation|watchdog|both)" ;;
+    esac
 
-log "poll complete"
+    log "poll complete"
+fi

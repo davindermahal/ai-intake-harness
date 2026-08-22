@@ -1,9 +1,32 @@
 # Plan: A bats-core test suite for the ai-intake-harness bash codebase
 
-**Status**: active
-**Branch**: (none yet — planning only)
+**Status**: completed
+**Branch**: task/add-tests
 **Created**: 2026-08-21
 **Updated**: 2026-08-21
+
+## Implementation summary (2026-08-21)
+
+All ten sequencing steps implemented: structural prerequisites (intake-poll.sh main-guard; the 3
+documented shellcheck nits plus one found in lib/ai/local-llm.sh, all fixed), bats-core/bats-
+support/bats-assert vendored as git submodules under `test/` (no sudo available for the apt
+package, so submodules from the start rather than switching later), and all seven test layers
+(0-6) plus CI wiring. 95 bats tests across `test/unit/` and `test/integration/`, all passing;
+`make lint` clean. `test/live/jira_live.bats` (Layer 6) is wired but not run this session — it
+needs real Jira/LM Studio and wasn't exercised.
+
+One deviation from the plan worth flagging: `/Makefile` was previously gitignored repo-wide
+(dogfooding-only, alongside `.ai/intake.config`/`scripts/`). Committing `make lint`/`make test`
+required un-ignoring it — see the `.gitignore` comment added alongside that line. The committed
+Makefile carries only `lint`/`test`/`test-live`, no self-hosted worktree-go/worktree-new targets,
+so vendoring it via git subtree into a consumer's `ai-intake-harness/` subdirectory is harmless.
+
+Layer 4b (worktree-go.sh/worktree-new.sh black-box) is narrower than the plan's full sketch:
+worktree-new.sh has full black-box coverage, but worktree-go.sh is covered only for the HEADLESS=1
+env-check-failure path (the one path intake-poll.sh's dispatch_implementation actually drives) —
+its interactive CLAUDE=1/TERMINAL=1 path opens a real terminal window and isn't meaningfully
+testable headlessly, consistent with the plan's own "lower priority, most expensive layer" framing
+for 4b.
 
 ## Goal
 
