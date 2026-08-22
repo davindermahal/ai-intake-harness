@@ -44,10 +44,16 @@ setup() {
     assert_output ""
 }
 
-@test "slugify: unicode input survives lowercasing (sed's [^a-z0-9] is locale-aware, not ascii-only)" {
+@test "slugify: unicode handling depends on the shell's locale (sed's [^a-z0-9] is locale-aware, not ascii-only) — pin LC_ALL=C for a deterministic assertion" {
+    # Without pinning, this flaked across environments: a UTF-8 locale (e.g. this dev machine)
+    # leaves accented chars untouched ("café-résumé-fix"), while the C/POSIX locale GitHub
+    # Actions' runners default to strips them as non-[a-z0-9] ("caf-r-sum-fix") — same slugify(),
+    # different ambient locale. Pin LC_ALL so the test's own result no longer depends on whatever
+    # locale happens to be default wherever bats runs.
+    export LC_ALL=C
     run slugify "Café résumé fix"
     assert_success
-    assert_output "café-résumé-fix"
+    assert_output "caf-r-sum-fix"
 }
 
 @test "resolve_branch: falls back to 'ticket' suffix when the summary slugifies to empty" {

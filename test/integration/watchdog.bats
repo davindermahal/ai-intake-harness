@@ -56,7 +56,14 @@ EOF
     printf 'attempts=1\nlaunched=%s\n' "$(past 100000)" > "$(attempts_file PROJ-1)"
     export JIRA_AI_COMMENT_FOOTER='----
 🤖 _Posted by Claude (JIRA intake automation)_'
-    tracker_get_issue() { cat "$(fixture_json ticket-with-ai-comment)"; }
+    # Comment `created` timestamp built relative to "now" (well after `launched`, -100000s ago) —
+    # NOT the static fixtures/jira/ticket-with-ai-comment.json, whose baked-in date is only "after
+    # launch" by coincidence on the day it was written and silently goes stale (and this test with
+    # it) as real time passes past that fixed date.
+    local case_c_fixture="$BATS_TEST_TMPDIR/case-c.json"
+    jq --arg fp "$JIRA_AI_COMMENT_FOOTER" --arg created "$(date -u -d '-100 seconds' '+%Y-%m-%dT%H:%M:%S.000+0000')" \
+        -n '{fields:{comment:{comments:[{created:$created, body:("resolved locally\n\n" + $fp)}]}}}' > "$case_c_fixture"
+    tracker_get_issue() { cat "$case_c_fixture"; }
     run watchdog_check "PROJ-1"
     assert_success
     assert_output --partial "case C"
