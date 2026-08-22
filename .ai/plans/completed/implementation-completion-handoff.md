@@ -1,8 +1,40 @@
 # Plan: Deterministic implementation-completion handoff + accurate watchdog escalation
 
-**Status**: draft
+**Status**: completed
 **Created**: 2026-08-20
-**Updated**: 2026-08-20
+**Updated**: 2026-08-21
+
+## Implementation notes (2026-08-21)
+
+Implemented per this plan: `intake-poll.sh` (`launch_implementation_worker` clears any stale
+`.ai/impl-result.json` before every launch; new `reap_consume_implementation_result` reads/deletes
+it in `reap_running`'s dead-PID branch and calls `tracker_transition ... ready-for-verification` on
+a confirmed `"success"` outcome, leaving anything else — missing file, unreadable, `"blocked"` — for
+the watchdog; `watchdog_check`'s case-C message reworded to name both possible outcomes and give the
+manual `tracker-transition.sh` command instead of presuming failure), `.claude/settings.ai-harness-dev.json`
+(removed `./tracker-transition.sh` from the worker's allow list).
+
+`.ai/prompts/worktree-bootstrap-auto.md` (step 1) needed a deviation: it's gitignored consumer-side
+content and did not exist anywhere in this checkout, either DAV worktree, or this machine (only a
+same-named file from an unrelated project existed, used as a structural reference). Recreated it
+from scratch for this repo's own dogfooding, with the fix built in from the start — step 5 writes
+`.ai/impl-result.json` instead of calling `./tracker-transition.sh` (which the worker no longer has
+permission for). The plan's literal step-1 acceptance grep (`tracker-transition.sh` returns nothing)
+doesn't hold as written — the recreated file deliberately mentions the script twice, to tell the
+worker explicitly it no longer has that tool — but the substantive requirement (no live invocation
+of it) is verified: no bare/backtick-free `tracker-transition.sh` invocation appears anywhere in the
+file.
+
+Verified: `bash -n`/`shellcheck` clean on `intake-poll.sh` (only the pre-existing SC1091 info notice
+on the unrelated `intake-config.sh` source line). A standalone functional test of
+`reap_consume_implementation_result` (stubbed `tracker_transition`/`existing_branch`/
+`worktree_dir_for_branch`) confirmed all four cases: `"success"` → transitions and removes the file;
+`"blocked"` → leaves it for the watchdog; missing file → same; a failing `tracker_transition` call →
+logged, not raised (doesn't abort the reap loop under `set -euo pipefail`). Grepped the reworded
+watchdog message for both required elements ("genuine blocker" and the manual
+`tracker-transition.sh $key ready-for-verification` command) and confirmed the old
+"likely repeat the same failure" text is gone. Confirmed `.claude/settings.ai-harness-dev.json` no
+longer grants `tracker-transition.sh`.
 
 ## Goal
 

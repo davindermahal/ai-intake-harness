@@ -41,8 +41,14 @@
 # Automation boundary: build + verify only. Nothing is pushed to a shared remote, merged to
 # main, or deployed automatically — a human reviews the branch diff and merges.
 #
-# A flock guarantees a single instance; a durable in-flight set under .intake/inflight/
-# prevents re-picking a ticket an earlier (possibly crashed) run is still working.
+# A flock guarantees a single instance — see the crontab line below; this script does NOT take
+# the lock itself (a second `flock -n` on the same path from inside this process would conflict
+# with the fd the wrapper already holds and cause a spurious self-reject, so don't "fix" that by
+# adding one here). Every invocation, including ad hoc manual runs, MUST go through the
+# `flock -n .intake/poll.lock` wrapper — skipping it lets two instances double-dispatch the same
+# ticket, since the in-flight marker below is a plain read-then-write with no atomic locking of
+# its own. A durable in-flight set under .intake/inflight/ prevents re-picking a ticket an earlier
+# (possibly crashed) run is still working.
 #
 # Watchdog (In Progress sweep): every implementation launch (initial dispatch or a watchdog
 # restart) writes a durable record to .intake/attempts/<KEY> (attempts=N, launched=<epoch>) — the
@@ -77,7 +83,13 @@
 #   GEMINI_BIN=gemini                        gemini CLI binary (ai/gemini.sh) (default: gemini)
 #   GEMINI_FLAGS=""                          flags for headless gemini planning runs
 #   GEMINI_TIMEOUT=900                       seconds before a gemini planning run is killed
-#   AI_PROVIDER=claude|openai|local-llm|gemini   which ai_* adapter drives dispatches (default: claude)
+#   CODEX_BIN=codex                          codex CLI binary (ai/codex.sh) (default: codex)
+#   CODEX_FLAGS=""                           flags for headless codex planning runs
+#   CODEX_TIMEOUT=900                        seconds before a codex planning run is killed
+#   ANTIGRAVITY_BIN=agy                      Antigravity CLI binary (ai/antigravity.sh) (default: agy)
+#   ANTIGRAVITY_FLAGS=""                     flags for headless antigravity planning runs
+#   ANTIGRAVITY_TIMEOUT=900                  seconds before an antigravity planning run is killed
+#   AI_PROVIDER=claude|codex|antigravity|local-llm|gemini   which ai_* adapter drives dispatches (default: claude)
 #   AI_PLANNING_MODEL=...                    --model for planning runs (default: empty = CLI default)
 #   AI_IMPLEMENTATION_MODEL=...              --model for implementation runs (default: empty = CLI default)
 #   AI_LOCAL_LLM_TIMEOUT=3600                planning kill timeout when the resolved provider is
@@ -120,6 +132,12 @@ CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-900}"
 GEMINI_BIN="${GEMINI_BIN:-gemini}"
 GEMINI_FLAGS="${GEMINI_FLAGS:-}"
 GEMINI_TIMEOUT="${GEMINI_TIMEOUT:-900}"
+CODEX_BIN="${CODEX_BIN:-codex}"
+CODEX_FLAGS="${CODEX_FLAGS:-}"
+CODEX_TIMEOUT="${CODEX_TIMEOUT:-900}"
+ANTIGRAVITY_BIN="${ANTIGRAVITY_BIN:-agy}"
+ANTIGRAVITY_FLAGS="${ANTIGRAVITY_FLAGS:-}"
+ANTIGRAVITY_TIMEOUT="${ANTIGRAVITY_TIMEOUT:-900}"
 INFLIGHT_STALE_SECONDS="${INFLIGHT_STALE_SECONDS:-1800}"
 JIRA_MAX_WORKTREES="${JIRA_MAX_WORKTREES:-2}"      # max simultaneous implementation workers
 JIRA_RUN_STALE_SECONDS="${JIRA_RUN_STALE_SECONDS:-14400}"  # reclaim a hung worker after ~4h
@@ -184,6 +202,37 @@ inflight_active() {  # 0 = currently in-flight (skip), 1 = free to process
 inflight_mark()  { date +%s > "$INFLIGHT_DIR/$1"; }
 inflight_clear() { rm -f "$INFLIGHT_DIR/$1"; }
 
+# reap_consume_implementation_result KEY — read and delete a just-exited implementation worker's
+# <worktree>/.ai/impl-result.json, if any, and deterministically transition the ticket to
+# ready-for-verification on a confirmed "success" outcome — the same "poller does the write, not
+# the AI" pattern dispatch_planning already uses for the planning phase (see
+# .ai/plans/completed/implementation-completion-handoff.md). A missing/unreadable/"blocked" result
+# is left alone — the existing watchdog stays the safety net for every case this doesn't cover, so
+# no new failure mode is introduced. A transition failure is logged, not raised — reap_running runs
+# under `set -euo pipefail` and must not abort the reap loop over a single ticket's REST call.
+reap_consume_implementation_result() {
+    local key="$1" branch wtdir result_file outcome=""
+    branch="$(existing_branch "$key")"
+    if [ -n "$branch" ]; then
+        wtdir="$(worktree_dir_for_branch "$branch")"
+        result_file="$wtdir/.ai/impl-result.json"
+        if [ -f "$result_file" ]; then
+            outcome="$(jq -r '.outcome // empty' "$result_file" 2>/dev/null || true)"
+            rm -f "$result_file"
+        fi
+    fi
+    if [ "$outcome" = "success" ]; then
+        if tracker_transition "$key" ready-for-verification; then
+            log "  $key: deterministic post-implementation transition to ready-for-verification"
+            dispatch_escalation_clear "$key" implementation-transition
+        else
+            log "  $key: deterministic post-implementation transition FAILED — leaving for watchdog"
+        fi
+    else
+        log "  $key: worker exited without a confirmed-success result (outcome=${outcome:-none}) — leaving for watchdog"
+    fi
+}
+
 # ----- running-slot set (implementation concurrency cap) ------------------------------
 # A detached implementation worker occupies a slot from launch (worktree-go HEADLESS writes its
 # PID to $RUNNING_DIR/<KEY>.pid) until its process exits. reap_running() frees slots whose worker
@@ -199,6 +248,7 @@ reap_running() {
         pid="$(cat "$f" 2>/dev/null || true)"
         if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
             log "  slot freed for $key (worker pid ${pid:-?} exited)"
+            reap_consume_implementation_result "$key"
             rm -f "$f" "$RUNNING_DIR/$key.meta"
             continue
         fi
@@ -215,6 +265,18 @@ running_count() {
     local n=0 f
     for f in "$RUNNING_DIR"/*.pid; do [ -e "$f" ] && n=$((n+1)); done
     echo "$n"
+}
+
+# worker_live KEY — true if $RUNNING_DIR/<KEY>.pid names a currently-live process. Used to refuse
+# re-dispatching an implementation worker for a ticket that already has one running — guards
+# against a failed post-launch status-transition (which leaves the in-flight marker to go stale
+# and the ticket re-picked) from launching a SECOND worker into the same worktree while the first
+# is still building (see .ai/plans/active/2026-08-21-bugs.md bug #2).
+worker_live() {
+    local pidfile="$RUNNING_DIR/$1.pid" pid
+    [ -f "$pidfile" ] || return 1
+    pid="$(cat "$pidfile" 2>/dev/null || true)"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
 # local_llm_worker_live — true if any live implementation-worker slot was launched with the
@@ -373,7 +435,7 @@ load_ai_provider() {
 # ----- dispatch -----------------------------------------------------------------------
 dispatch_planning() {
     local key="$1"; local ctx="$CONTEXT_DIR/$key.json" dec="$DECISION_DIR/$key.json"
-    local summary branch wt action comment spec provider model saved_model saved_timeout rc abstract_state tmp_ctx
+    local summary branch wt action comment spec provider model saved_model saved_timeout rc abstract_state tmp_ctx pt_marker
     tracker_get_issue "$key" > "$ctx"
     # Tracker-agnostic eligibility field for prompts/intake-planning.md's re-check (guards the race
     # between tracker_search finding the ticket and this dispatch actually running) — computed from
@@ -387,6 +449,18 @@ dispatch_planning() {
     model="$(spec_model "$spec")"
     branch="$(resolve_branch "$key" "$summary")"
     wt="$(dirname "$REPO_ROOT")/${PLAN_WORKTREE_PREFIX}$key"
+
+    # If a prior pass already escalated a failed plan-review/needs-author-input transition for
+    # this exact AI spec, don't silently re-run the whole (billed) planning phase and repost the
+    # same comment every ~30 minutes once the in-flight marker goes stale — wait for a human to
+    # fix the tracker status mapping (or re-queue the ticket, which won't match this spec/marker
+    # if the label changed). Cleared on the next successful transition, see below.
+    pt_marker="$(dispatch_marker "$key" planning-transition)"
+    if [ -f "$pt_marker" ] && [ "$(cat "$pt_marker" 2>/dev/null)" = "$spec" ]; then
+        log "  $key: planning still blocked on a failed plan-review/needs-author-input transition (same AI spec) — already reported, not re-running"
+        return 0
+    fi
+
     rm -f "$dec"
     log "dispatch $key -> planning (branch $branch, AI: $spec)"
     if [ "$DRY_RUN" = "1" ]; then log "  [dry-run] would plan $key on $branch (AI $spec) in an ephemeral worktree"; return 0; fi
@@ -416,7 +490,9 @@ dispatch_planning() {
     saved_model="$AI_PLANNING_MODEL"; saved_timeout="$CLAUDE_TIMEOUT"
     [ -n "$model" ] && AI_PLANNING_MODEL="$model"
     [ "$provider" = "local-llm" ] && CLAUDE_TIMEOUT="$AI_LOCAL_LLM_TIMEOUT"
-    ai_run_planning "$key" "$branch" "$ctx" "$dec" "$wt"; rc=$?
+    # `cmd; rc=$?` is dead code under `set -e` — a failing command aborts the script right there,
+    # before `rc=$?` ever runs. `cmd || rc=$?` is the form actually exempt from `-e`.
+    rc=0; ai_run_planning "$key" "$branch" "$ctx" "$dec" "$wt" || rc=$?
     AI_PLANNING_MODEL="$saved_model"; CLAUDE_TIMEOUT="$saved_timeout"
     if [ "$rc" -ne 0 ]; then
         log "  $key: AI planning FAILED — removing worktree, leaving marker for stale-reclaim"
@@ -442,7 +518,7 @@ dispatch_planning() {
     # On a clean plan, append the FULL plan contents inline beneath the summary so the author can
     # read/approve it without a checkout (the plan is committed on the feature branch locally and
     # never pushed, so a Bitbucket link would 404). Must read it BEFORE removing the worktree.
-    # `make jira-plan KEY=$key` prints the same file locally. Jira wiki: {code}…{code} = code block.
+    # `make intake-plan KEY=$key` prints the same file locally. Jira wiki: {code}…{code} = code block.
     if [ "$action" = "clean" ] && [ -n "$plan_file" ]; then
         local plan_path="$plan_file" inline_block
         case "$plan_path" in /*) ;; *) plan_path="$wt/$plan_path" ;; esac
@@ -450,7 +526,7 @@ dispatch_planning() {
             inline_block="
 
 ----
-*Full plan* (\`$plan_file\`) — also available locally via \`make jira-plan KEY=$key\`:
+*Full plan* (\`$plan_file\`) — also available locally via \`make intake-plan KEY=$key\`:
 
 {code}
 $(cat "$plan_path")
@@ -466,7 +542,7 @@ $(cat "$plan_path")
                 comment="$comment
 
 ----
-Full plan (\`$plan_file\`, $(wc -c < "$plan_path") bytes) is too large to inline in a comment — see the committed file on \`$branch\`, or run \`make jira-plan KEY=$key\` locally."
+Full plan (\`$plan_file\`, $(wc -c < "$plan_path") bytes) is too large to inline in a comment — see the committed file on \`$branch\`, or run \`make intake-plan KEY=$key\` locally."
             fi
         else
             log "  $key: plan_file '$plan_file' not found — posting summary without inline plan"
@@ -477,8 +553,16 @@ Full plan (\`$plan_file\`, $(wc -c < "$plan_path") bytes) is too large to inline
 
     [ -n "$comment" ] && post_comment "$key" "$comment"   # always post the summary (best-effort)
     case "$action" in
-        questions) tracker_transition "$key" needs-author-input && inflight_clear "$key" ;;
-        clean)     tracker_transition "$key" plan-review        && inflight_clear "$key" ;;
+        questions) if tracker_transition "$key" needs-author-input; then
+                       inflight_clear "$key"; dispatch_escalation_clear "$key" planning-transition
+                   else
+                       dispatch_escalate_once "$key" planning-transition "$spec" "Planning for $key finished (needs author input) and the summary comment above was posted, but the follow-up transition to *Needs Author Input* failed (see the poller log on the build host, and confirm that status exists and TRACKER_NATIVE_STATUS_* — or the tracker's status mapping — matches it). Re-running planning won't help until that's fixed, so it's paused for this ticket; move it back to *Ready for Planning* by hand once corrected to re-queue. This message is posted once."
+                   fi ;;
+        clean)     if tracker_transition "$key" plan-review; then
+                       inflight_clear "$key"; dispatch_escalation_clear "$key" planning-transition
+                   else
+                       dispatch_escalate_once "$key" planning-transition "$spec" "Planning for $key finished (clean) and the plan comment above was posted, but the follow-up transition to *Plan Review* failed (see the poller log on the build host, and confirm that status exists and TRACKER_NATIVE_STATUS_* — or the tracker's status mapping — matches it). Re-running planning won't help until that's fixed, so it's paused for this ticket; move it back to *Ready for Planning* by hand once corrected to re-queue. This message is posted once."
+                   fi ;;
         skip)      log "  $key: planning skipped" ; inflight_clear "$key" ;;
         *)         log "  $key: unrecognized planning action '$action' — leaving in-flight" ;;
     esac
@@ -506,6 +590,11 @@ launch_implementation_worker() {
         resume=1
         log "  $key: existing worktree $wtdir — will RESUME in place"
     fi
+    # A RESUMEd worktree is not ephemeral — it may still carry a prior run's impl-result.json
+    # (e.g. a leftover "success" from an earlier completed pass). Clear it before every launch,
+    # not just after reaping, so a hard crash on this new run can never be misread as the old
+    # run's result (see .ai/plans/completed/implementation-completion-handoff.md, Key decision 2).
+    rm -f "$wtdir/.ai/impl-result.json"
     mkdir -p "$STATE_DIR/logs"
     logfile="$STATE_DIR/logs/$key-worktree-$(date +%Y%m%d-%H%M%S).log"
     log "  $key: launching worktree-go (HEADLESS, RESUME=$resume, PROVIDER=$provider, MODEL=${model:-<default>}) on branch $branch; log $logfile"
@@ -533,6 +622,14 @@ dispatch_implementation() {
         return 0
     fi
 
+    # Refuse to launch a second worker into the same worktree while one is still running (e.g. the
+    # in-flight marker went stale — INFLIGHT_STALE_SECONDS < the worker's own run budget — while a
+    # post-launch status transition had failed and left the ticket eligible for re-pickup).
+    if worker_live "$key"; then
+        log "  $key: an implementation worker is already running for $key — skipping re-dispatch"
+        return 0
+    fi
+
     # LM Studio is one shared inference server — never launch a second local-llm implementation
     # worker while one is live. Defer exactly like the JIRA_MAX_WORKTREES capacity
     # check: the ticket stays queued and a later poll picks it up when the slot frees.
@@ -551,7 +648,14 @@ dispatch_implementation() {
         attempts_reset "$key"
         dispatch_escalation_clear "$key" implementation
         post_comment "$key" "Implementation launched on branch \`$branch\` via make worktree-go (headless, AI: $spec). A worker is implementing the committed plan, building, and verifying; it will post results here. Nothing is pushed, merged, or deployed automatically — review the branch and merge when ready."
-        tracker_transition "$key" in-progress && inflight_clear "$key"
+        if tracker_transition "$key" in-progress; then
+            inflight_clear "$key"
+        else
+            # Worker is genuinely running — don't touch the in-flight marker here (letting it go
+            # stale would just re-trigger the worker_live guard above, which is a silent no-op).
+            # Escalate once so a human notices the tracker status is now out of sync with reality.
+            dispatch_escalate_once "$key" implementation-transition "$spec" "Implementation for $key was launched successfully on branch \`$branch\`, but the follow-up status transition to *In Progress* failed (see the poller log on the build host). The worker is running; the ticket's tracker status just hasn't caught up. This message is posted once."
+        fi
     else
         log "  $key: worktree-go FAILED (see $logfile)"
         dispatch_escalate_once "$key" implementation "$spec" "Implementation trigger FAILED for $key during worktree provisioning. See the poller log $logfile on the build host. Left in Ready for Implementation; it will be retried on later polls (this message is posted once per failing configuration)."
@@ -573,7 +677,10 @@ watchdog_stalled_comment_after() {
     tracker_get_issue "$key" > "$ctx"
     while IFS= read -r created; do
         [ -n "$created" ] || continue
-        c_epoch="$(date -d "$created" +%s 2>/dev/null || echo 0)"
+        if ! c_epoch="$(date -d "$created" +%s 2>/dev/null)"; then
+            log "  $key: watchdog couldn't parse comment timestamp '$created' — treating as unknown, not as case A"
+            c_epoch=0
+        fi
         if [ "$c_epoch" -gt "$launched" ]; then found=1; break; fi
     done < <(jq -r --arg fp "$JIRA_AI_COMMENT_FOOTER" \
         '.fields.comment.comments[]? | select((.body // "") | contains($fp)) | .created' "$ctx")
@@ -624,7 +731,7 @@ watchdog_check() {
     # PID dead/missing past the grace period: case A (silent death) or C (reported blocker).
     if watchdog_stalled_comment_after "$key" "$launched"; then
         log "  $key: an AI-footer comment was posted after the last launch (case C) — escalating"
-        watchdog_escalate "$key" "already reported back (a blocker/failure comment posted after its last launch) — automatic restart would likely repeat the same failure. Move back to *Ready for Implementation* to re-queue after addressing it."
+        watchdog_escalate "$key" "already reported back (a comment posted after its last launch), but the ticket was never transitioned out of In Progress. Read the comment above: if it reported a genuine blocker, address that and move back to *Ready for Implementation* to re-queue. If the work actually finished, transition it by hand instead — \`tracker-transition.sh $key ready-for-verification\` — re-queuing a completed implementation triggers a redundant second implementation pass."
         return 0
     fi
 

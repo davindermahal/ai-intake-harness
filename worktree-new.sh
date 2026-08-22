@@ -64,7 +64,7 @@ wt_write_env "$REPO_ROOT" "$WORKTREE_DIR" "$PORT" "$XDEBUG_PORT" "$DB_NAME"
 
 # 3. clone the main database
 echo "==> Cloning database ${SOURCE_DB} → ${DB_NAME}..."
-wt_create_empty_db "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD"
+wt_create_empty_db "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$SOURCE_DB"
 wt_clone_db "$SOURCE_DB" "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD"
 echo "Database ready."
 

@@ -8,9 +8,10 @@ between. The end-to-end flow it automates is:
 
 > **ticket → plan → (human approval) → isolated worktree → build/verify → report back**
 
-It is designed to drive an AI coding agent (today the Claude Code CLI, with seams intended for other
-providers) from a background poller, so that routine planning and implementation work can proceed
-largely unattended while a person stays in the loop at the decision points that matter.
+It is designed to drive an AI coding agent — Claude Code by default, with Gemini CLI, OpenAI's
+Codex CLI, and Google's Antigravity CLI also fully working via the same adapter seam — from a
+background poller, so that routine planning and implementation work can proceed largely
+unattended while a person stays in the loop at the decision points that matter.
 
 ## The problem it solves
 

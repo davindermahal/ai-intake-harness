@@ -133,8 +133,12 @@ Backlog → Selected → Ready for Planning → Needs Author Input ⇄ Ready for
 4. **Implementation trigger → worktree → detached worker.** The poller launches the worktree
    provisioning + worker, records the worker's process id in a "running slot" file for the
    concurrency cap and liveness checks, and posts a launch note.
-5. **Worker → tracker.** When the worker finishes, it posts its build/verify results back to the
-   ticket through the helper CLIs and (on success) transitions the ticket to the verification state.
+5. **Worker → result file → poller → tracker.** When the worker finishes, it writes a deterministic
+   result file (`.ai/impl-result.json`) into the worktree instead of transitioning the ticket
+   itself. The **poller** reads that file on the next poll (reaping the worker's freed running-slot)
+   and, only on a confirmed `success` outcome, transitions the ticket to the verification state —
+   keeping the transition-authority boundary in one place (the poller, which already owns every
+   other tracker write) rather than split across the worker process too.
 6. **Watchdog.** On later polls, the watchdog reads durable per-ticket dispatch records plus process
    liveness to decide healthy / restart / escalate, and comments accordingly.
 

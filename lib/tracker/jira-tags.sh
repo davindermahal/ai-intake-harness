@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tracker adapter: Jira Cloud via labels, for one shared project used by multiple repos — see
-# .ai/plans/active/jira-tags-tracker-adapter.md for the design. Implements the same `tracker_*`
+# .ai/plans/completed/jira-tags-tracker-adapter.md for the design. Implements the same `tracker_*`
 # contract as lib/tracker/jira.sh, sharing REST/auth plumbing with it via jira-common.sh, but:
 #
 #   - Represents the harness's abstract workflow state as `state:<step>` labels instead of the
@@ -23,7 +23,7 @@
 # Required env (see jira-common.sh's jira_common_load_env): JIRA_SITE_URL, plus either
 # JIRA_INTAKE_EMAIL + JIRA_INTAKE_API_TOKEN (API-token auth) or, if those are unset, a browser
 # session cookie fallback (see lib/tracker/jira-cookie.sh and
-# .ai/plans/active/jira-cookie-auth-fallback.md).
+# .ai/plans/completed/jira-cookie-auth-fallback.md).
 # Required config (.ai/intake.config): TRACKER_PROJECT_KEY, TRACKER_APP_TAG.
 # Optional config: TRACKER_GATE_COMMENTS=true to also assignee-gate tracker_add_comment (default:
 # false — see the module comment on tracker_add_comment for why comments are ungated by default).

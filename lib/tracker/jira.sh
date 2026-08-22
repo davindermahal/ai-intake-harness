@@ -16,7 +16,7 @@
 # All Jira I/O goes through one personal account (single-account model), authenticated either with
 # an API token or, if no token is configured, a browser session cookie (see
 # lib/tracker/jira-common.sh / lib/tracker/jira-cookie.sh and
-# .ai/plans/active/jira-cookie-auth-fallback.md). Required env, loaded from .env / .env.local by
+# .ai/plans/completed/jira-cookie-auth-fallback.md). Required env, loaded from .env / .env.local by
 # tracker_load_env:
 #   JIRA_SITE_URL=https://your-site.atlassian.net
 # plus JIRA_INTAKE_EMAIL + JIRA_INTAKE_API_TOKEN (API-token auth) or, if those are left unset, the

@@ -112,7 +112,15 @@ memory; they are integration lessons more than harness-code bugs:
   mode if tool-use translation proves unreliable for a given local model.
 - The **OpenAI provider is a stub** that fails loudly; its real integration was deferred to a follow-up.
 - The **Gemini provider** supports both phases, but its implementation-phase automation boundary
-  is tool-*category*-level (`--sandbox` + `--approval-mode yolo` + `coreTools`/`excludeTools`),
-  coarser than Claude's per-command allow/deny (design decision #5) — an explicit, author-accepted
-  trade-off, not a gap to silently work around. See `lib/ai/gemini.sh`'s header comment.
+  is tool-*category*-level (`--sandbox` + `--approval-mode yolo` + `--skip-trust` +
+  `coreTools`/`excludeTools`), coarser than Claude's per-command allow/deny (design decision #5) —
+  an explicit, author-accepted trade-off, not a gap to silently work around. See `lib/ai/gemini.sh`'s
+  header comment. Its flag assumptions were originally written without a live `gemini --help` (the
+  build environment had no shell access to the CLI) and have since been live-verified against
+  gemini-cli 0.56.0, which found and fixed two real bugs: `--settings <path>` doesn't exist (Gemini
+  auto-discovers `.gemini/settings.json` instead, no flag), and `--approval-mode yolo` silently
+  downgrades to interactive in an untrusted (i.e. every fresh) worktree without `--skip-trust` —
+  the latter would have hung headless workers indefinitely rather than erroring. `ai_load_env` was
+  also widened to accept Vertex AI / Gemini Code Assist auth (`GOOGLE_CLOUD_PROJECT`/
+  `GOOGLE_CLOUD_LOCATION`) as an alternative to `GEMINI_API_KEY`, since Gemini CLI supports both.
 - A **GitHub Issues tracker adapter** is anticipated but not yet built.

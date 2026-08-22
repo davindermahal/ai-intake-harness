@@ -61,13 +61,24 @@ wt_precreate_dirs() {
     mkdir -p "$1/vendor" "$1/var"
 }
 
-# Drop and (re)create an empty database via host psql.
-# Usage: wt_create_empty_db <db-name> <pg-user> <pg-password>
+# Drop and (re)create an empty database via host psql, with the same guards wt_drop_db has so we
+# can never drop the source DB: refuses unless <db> matches ${PROJECT_DB_PREFIX}_* AND differs
+# from <source-db>. Identifiers are passed through psql's -v :"name" substitution (not string-
+# interpolated) so a <db-name> containing a quote can't break out of the SQL.
+# Usage: wt_create_empty_db <db-name> <pg-user> <pg-password> <source-db>
 wt_create_empty_db() {
-    local db="$1" user="$2" pass="$3"
-    PGPASSWORD="$pass" psql -h localhost -U "$user" -d postgres \
-        -c "DROP DATABASE IF EXISTS \"${db}\"" \
-        -c "CREATE DATABASE \"${db}\"" > /dev/null
+    local db="$1" user="$2" pass="$3" source_db="$4"
+    local prefix="${PROJECT_DB_PREFIX:-myapp}"
+    case "$db" in
+        "${prefix}"_*) ;;
+        *) echo "   refusing to create '${db}' — not a '${prefix}_*' worktree database" >&2; return 1 ;;
+    esac
+    if [ "$db" = "$source_db" ]; then
+        echo "   refusing to create '${db}' — it is the source database" >&2; return 1
+    fi
+    PGPASSWORD="$pass" psql -h localhost -U "$user" -d postgres -v db="$db" \
+        -c 'DROP DATABASE IF EXISTS :"db"' \
+        -c 'CREATE DATABASE :"db"' > /dev/null
 }
 
 # Clone a source database into a target via pg_dump | pg_restore (host side).
@@ -166,7 +177,9 @@ wt_remove_container() {
 # Refuses unless <db> matches ${PROJECT_DB_PREFIX}_* AND differs from <source-db>. Terminates any
 # open connections first, then drops it. Returns 0 if <db> existed and was dropped, 1 if it did
 # not exist (or a guard refused) — callers use this to report an accurate outcome instead of
-# assuming success. Usage: wt_drop_db <db> <user> <pass> <source-db>
+# assuming success. Identifiers/values are passed through psql's -v :"name"/:'name' substitution
+# (not string-interpolated) so a <db-name> containing a quote can't break out of the SQL.
+# Usage: wt_drop_db <db> <user> <pass> <source-db>
 wt_drop_db() {
     local db="$1" user="$2" pass="$3" source_db="$4"
     local prefix="${PROJECT_DB_PREFIX:-myapp}"
@@ -178,12 +191,12 @@ wt_drop_db() {
         echo "   refusing to drop '${db}' — it is the source database" >&2; return 1
     fi
     local exists
-    exists=$(PGPASSWORD="$pass" psql -h localhost -U "$user" -d postgres -tAc \
-        "SELECT 1 FROM pg_database WHERE datname = '${db}'" 2>/dev/null)
+    exists=$(PGPASSWORD="$pass" psql -h localhost -U "$user" -d postgres -tAc -v db="$db" \
+        "SELECT 1 FROM pg_database WHERE datname = :'db'" 2>/dev/null)
     [ "$exists" = "1" ] || return 1
-    PGPASSWORD="$pass" psql -h localhost -U "$user" -d postgres \
-        -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db}' AND pid <> pg_backend_pid()" \
-        -c "DROP DATABASE IF EXISTS \"${db}\"" > /dev/null 2>&1
+    PGPASSWORD="$pass" psql -h localhost -U "$user" -d postgres -v db="$db" \
+        -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db' AND pid <> pg_backend_pid()" \
+        -c 'DROP DATABASE IF EXISTS :"db"' > /dev/null 2>&1
     return 0
 }
 

@@ -26,9 +26,13 @@ report back**, driven by a background **poller** (`intake-poll.sh`) fired from c
   `project_permission_profile`.
 - **AI provider adapter** (`lib/ai/<name>.sh`) — one per AI backend. Contract: `ai_load_env`,
   `ai_run_planning`, `ai_run_implementation`. Built-in: `claude.sh` (fully working, default),
-  `local-llm.sh` (routes the claude CLI directly at LM Studio's native Anthropic-compatible
-  endpoint — experimental, unverified end-to-end per `docs/lessons-learned.md`), `openai.sh`
-  (stub, fails loudly).
+  `gemini.sh` (fully working, both phases), `codex.sh` (fully working, both phases; fixed
+  `-s workspace-write -a never` automation boundary, persisted-login auth, not an env var),
+  `antigravity.sh` (Google's Antigravity CLI, binary `agy`; fixed `--sandbox
+  --dangerously-skip-permissions` automation boundary, weaker-verified than Codex's, treat as
+  experimental; persisted-login auth), `local-llm.sh` (routes the claude CLI directly at LM
+  Studio's native Anthropic-compatible endpoint — experimental, unverified end-to-end per
+  `docs/lessons-learned.md`).
 
 `lib/intake-config.sh` is the single place that turns `.ai/intake.config` selections (in a
 *consumer* repo) into which concrete adapter files get sourced.
@@ -69,9 +73,10 @@ Full terminology is in `docs/glossary.md`. Load-bearing terms used throughout th
 
 ## Non-goals (v1), from `README.md` "Future directions"
 
-- **Multi-AI abstraction is only partially built.** The `ai_*` seam exists and `claude.sh` is
-  fully working; `openai.sh` is a stub that fails loudly; `local-llm.sh` is experimental. Naming
-  (`ai-intake-harness`) anticipates more providers, but a second real one hasn't driven further
-  design yet.
+- **Multi-AI abstraction is largely built.** The `ai_*` seam exists and `claude.sh`, `gemini.sh`,
+  `codex.sh`, and `antigravity.sh` are all fully working (both phases); `local-llm.sh` remains
+  experimental (unverified end-to-end), and `antigravity.sh`'s automation boundary is
+  weaker-verified than the others' (see `docs/design-decisions.md` #5). There is no longer a stub
+  provider in the seam.
 - **No GitHub Issues tracker adapter yet** — deferred until a second real tracker consumer exists
   to design against. Only `jira.sh` exists today.
