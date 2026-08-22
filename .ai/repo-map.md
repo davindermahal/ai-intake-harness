@@ -36,8 +36,20 @@
   worktree create/reuse, port allocation, env file writes, container start/stop, database
   create/clone/drop (with guards against ever dropping the shared source DB), terminal launch.
   Generic orchestration only — no stack-specific logic (that's the project adapter's job).
-- **`lib/tracker/jira.sh`** — the built-in (and currently only) tracker adapter: Jira Cloud over
-  REST with a single API-token account. Implements the full `tracker_*` contract.
+- **`lib/tracker/jira.sh`** — the built-in status-based tracker adapter: Jira Cloud over REST with
+  a single API-token account, using the project's native status field as the state machine.
+  Implements the full `tracker_*` contract.
+- **`lib/tracker/jira-tags.sh`** — a second built-in tracker adapter, for a Jira project shared by
+  multiple repos: same `tracker_*` contract, but represents the harness's abstract workflow state
+  as `state:<step>` labels (scoped per-repo via a `TRACKER_APP_TAG` label) instead of the native
+  status field, since a shared project's status column set is usually too coarse to carry the full
+  state machine. See `.ai/plans/completed/jira-tags-tracker-adapter.md`. This is the adapter this
+  repo's own `.ai/intake.config` selects (`TRACKER=jira-tags`).
+- **`lib/tracker/jira-common.sh`** — shared Jira Cloud REST/auth plumbing sourced by both `jira.sh`
+  and `jira-tags.sh` (not a `tracker_*` adapter itself, never selected via `TRACKER` directly).
+- **`lib/tracker/jira-cookie.sh`** — browser session-cookie extraction, the auth fallback for
+  accounts that can't get an API token issued; sourced by `jira-common.sh`. See
+  `.ai/plans/completed/jira-cookie-auth-fallback.md`.
 - **`lib/ai/claude.sh`** — the default, fully-working AI provider adapter (Claude Code CLI).
   Extracted from what used to be inline poller/worktree-go logic; supports a model override via
   `AI_PLANNING_MODEL`/`AI_IMPLEMENTATION_MODEL`. Not guarded against re-sourcing, since a
@@ -46,9 +58,17 @@
   `ANTHROPIC_BASE_URL` directly at LM Studio's native Anthropic-compatible endpoint so local
   models can drive the same agent invocation unmodified. Unverified end-to-end from a host that
   can reach a real local model (see `docs/lessons-learned.md`).
-- **`lib/ai/openai.sh`** — stub AI provider adapter. Exercises the `ai_*` seam so
-  `AI_PROVIDER=openai` / the `ai-provider-openai` label work end-to-end structurally, but fails
-  loudly rather than doing anything real; real integration is deferred.
+- **`lib/ai/gemini.sh`** — fully-working AI provider adapter (Gemini CLI, both phases). Coarser
+  automation boundary than Claude's (`--sandbox` + `--approval-mode yolo` + a tool-category
+  settings file) — see `docs/design-decisions.md` #5.
+- **`lib/ai/codex.sh`** — fully-working AI provider adapter (OpenAI's Codex CLI, both phases).
+  Automation boundary is a fixed `-s workspace-write -a never` flag pair, no project-supplied
+  settings file needed. Auth is a persisted login (`codex login`), not an env var — see
+  `docs/design-decisions.md` #5.
+- **`lib/ai/antigravity.sh`** — fully-working AI provider adapter (Google's Antigravity CLI,
+  binary `agy`, both phases). Automation boundary is `--sandbox --dangerously-skip-permissions`;
+  weaker-verified than Codex's since `--sandbox`'s exact restrictions aren't confirmed — treat as
+  experimental. Auth is also a persisted login (interactive `agy` session), not an env var.
 
 Note: **project adapters** (`scripts/lib/project/<name>.sh`, e.g. a Symfony/Docker adapter) are
 not part of this repo — they live in each *consumer* repo that vendors this harness in, since

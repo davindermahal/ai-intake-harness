@@ -53,8 +53,9 @@ Backlog → Selected → Ready for Planning → Needs Author Input ⇄ Ready for
   `ai-plan-<profile>` (who authors the plan) and/or `ai-impl-<profile>` (who implements it), where
   `<profile>` names an `AI_PROFILE_<name>="provider:model"` entry in `.ai/intake.config` — e.g.
   `ai-plan-opus` + `ai-impl-qwen` = Claude plans, the local Qwen implements. The legacy
-  single-label form `ai-provider-claude` | `ai-provider-openai` | `ai-provider-local-llm` still
-  works (both phases, provider only). With no label the configured default (`AI_PROVIDER` in
+  single-label form `ai-provider-claude` | `ai-provider-gemini` | `ai-provider-codex` |
+  `ai-provider-antigravity` | `ai-provider-local-llm` still works (both phases, provider only).
+  With no label the configured default (`AI_PROVIDER` in
   `.ai/intake.config`, normally `claude`) is used.
 
 ### 1. Planning — trigger: status = `Ready for Planning`
@@ -89,11 +90,14 @@ Backlog → Selected → Ready for Planning → Needs Author Input ⇄ Ready for
   the ticket to **`In Progress`**.
 - **Concurrency:** only a capped number of workers run at once (`JIRA_MAX_WORKTREES`, default 2). Extra
   ready tickets wait for a slot to free on a later poll — no action needed from you.
-- **You observe with:** `make intake-logs KEY=<KEY>` (tails that worker's implement/build/verify log).
+- **You observe with:** the worker's log at `.intake/logs/<KEY>-*.log` (`tail -f`, or wire up
+  `make intake-logs KEY=<KEY>` yourself — see "Manual / operator commands" below).
 
 ### 5. Verification & merge — trigger: worker finishes → `Ready for Verification`
-- **What fires (success):** the worker posts its build/verify results to the ticket and moves it to
-  **`Ready for Verification`**.
+- **What fires (success):** the worker posts its build/verify results to the ticket and writes a
+  deterministic result file; the **poller** (not the worker itself) reads that file on its next
+  pass and, only on a confirmed success outcome, moves the ticket to **`Ready for Verification`** —
+  keeping the transition-authority boundary in one place.
 - **What fires (failure/blocker):** the worker posts what went wrong and **leaves the ticket in
   `In Progress`** — so "still In Progress" reliably means "not finished".
 - **You do:** review the branch diff and **merge it yourself. The automation never pushes, merges, or
@@ -130,7 +134,8 @@ crontab shape (see the consumer's `JIRA-WORKFLOW.md` for the exact installed lin
 
 > **Note:** the wrapper the crontab points at is commonly host-only / gitignored, so a rename or move
 > of the scripts won't update it automatically. After any such change, confirm the poller still runs
-> with `make intake-status`.
+> by checking `.intake/poll.log` grows (`make intake-poll-log`) — or wire up `make intake-status`
+> yourself (see "Manual / operator commands" below).
 
 ---
 
@@ -139,15 +144,12 @@ crontab shape (see the consumer's `JIRA-WORKFLOW.md` for the exact installed lin
 You rarely need these — moving the ticket is the intended interface — but they're the escape hatches.
 
 ### Observe
-| Command | What it shows |
-|---|---|
-| `make intake-status` | Health dashboard: is the poller scheduled/running, queue counts, live workers. No KEY needed. |
-| `make intake-plan KEY=TICKET-70` | Prints the plan file (active/, then completed/). |
-| `make intake-logs KEY=TICKET-70 [LINES=200]` | Tails that ticket's latest implementation-worker log. |
-| `make intake-poll-log [LINES=200]` | Tails the poller log (dispatch/commit/transition across all tickets). |
-
-*(The `jira-plan` / `jira-logs` / `jira-poll-log` / `jira-status` aliases are the same commands under
-their older names.)*
+| Command | What it shows | Shipped by the harness? |
+|---|---|---|
+| `make intake-plan KEY=TICKET-70` | Prints the plan file (active/, then completed/). | Yes — README.md "Wire up the Makefile" |
+| `make intake-poll-log [LINES=200]` | Tails the poller log (dispatch/commit/transition across all tickets). | Yes — README.md "Wire up the Makefile" |
+| `make intake-status` | Health dashboard: is the poller scheduled/running, queue counts, live workers. No KEY needed. | No — a suggested extension over `.intake/`; write your own recipe (see README.md's note under the Makefile block) |
+| `make intake-logs KEY=TICKET-70 [LINES=200]` | Tails that ticket's latest implementation-worker log (`.intake/logs/<KEY>-*.log`). | No — same as above; `intake-poll-log` only tails the global poller log, not a per-ticket worker log |
 
 ### Force a poll now (don't wait for cron)
 ```bash

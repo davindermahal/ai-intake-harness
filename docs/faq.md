@@ -32,9 +32,12 @@ session cookie from your local Chrome/Firefox login on every run instead of usin
 how to verify that path specifically.
 
 ### Which AI backends does it support?
-The default and only fully-working provider drives the Claude Code CLI. There is an optional local-LLM
-provider (routes the same agent through a local proxy to a locally-hosted model) and a stub for another
-provider that currently fails loudly. The provider can be overridden per-ticket via a tracker label.
+Claude Code (the default), Gemini CLI, OpenAI's Codex CLI, and Google's Antigravity CLI are all
+fully-working providers, each with its own automation-boundary flags (see `docs/design-decisions.md`
+#5). There is also an experimental local-LLM provider (routes the Claude CLI through a local proxy
+at a locally-hosted model's native Anthropic-compatible endpoint) — unverified end-to-end, see
+`docs/lessons-learned.md`. No stub remains in the seam. The provider (and model) can be overridden
+per-ticket via a tracker label, or per-profile via `.ai/intake.config`.
 
 ### How do I add it to my own project?
 Vendor the harness into your repo, add one config file selecting the tracker and naming your project
