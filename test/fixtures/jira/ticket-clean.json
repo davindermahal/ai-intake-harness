@@ -1,0 +1,10 @@
+{
+  "key": "PROJ-1",
+  "fields": {
+    "summary": "Add retry logic to the payment webhook",
+    "status": {"name": "Ready for Planning"},
+    "description": "The webhook handler should retry transient failures.",
+    "labels": [],
+    "comment": {"comments": []}
+  }
+}

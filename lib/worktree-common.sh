@@ -108,8 +108,8 @@ wt_start_container() {
 
 # Wait up to 30s for the container to accept exec. Usage: wt_wait_container <container>
 wt_wait_container() {
-    local container="$1" i
-    for i in $(seq 1 30); do
+    local container="$1"
+    for _ in $(seq 1 30); do
         docker exec "$container" true 2>/dev/null && return 0
         sleep 1
     done
