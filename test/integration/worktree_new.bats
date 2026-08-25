@@ -20,6 +20,13 @@ POSTGRES_PASSWORD=secret
 POSTGRES_DB=myapp_main
 EOF
 
+    # The fixture project adapter below sets a non-empty APP_CONTAINER (opts into a container),
+    # so wt_start_container needs a Dockerfile at the repo root to build from — content is
+    # irrelevant, docker itself is stubbed below.
+    cat > "$CONSUMER/Dockerfile" <<'EOF'
+FROM ubuntu:24.04
+EOF
+
     mkdir -p "$CONSUMER/.ai" "$CONSUMER/scripts/lib/project"
     cat > "$CONSUMER/.ai/intake.config" <<'EOF'
 TRACKER=jira

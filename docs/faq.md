@@ -23,6 +23,19 @@ or, if you can't get one issued, a browser session cookie fallback — see the n
 trackers (e.g. GitHub Issues) can be supported by writing a new tracker adapter implementing the
 same contract; a GitHub adapter is anticipated but not yet built.
 
+### I have a team all running this harness against the same Jira project — will two people's
+### pollers pick up the same ticket?
+Not with the multi-developer-safe adapter (`TRACKER=jira-tags`, for a Jira project shared across
+repos): every search and every state-changing write is scoped to `assignee = currentUser()` /
+the authenticated account, so a poller only ever acts on tickets assigned to the identity it
+authenticated as — see `lib/tracker/jira-tags.sh`. The plain `TRACKER=jira` adapter has no such
+scoping; it's built for the single-account model (one dedicated account per project/repo — see
+`docs/design-decisions.md` #2) and would double-pick-up work if pointed at a project multiple
+developers poll simultaneously. One related edge case: a ticket that's queued (carries a pipeline
+label) but never assigned to anyone is invisible to *every* poller under `jira-tags` — the poller
+logs a warning for these so a human notices and assigns them, rather than the ticket silently
+never being picked up.
+
 ### Do I need to install Python for the Jira adapter?
 No, not by default. The Jira adapter normally authenticates with an API token over plain REST — no
 Python involved. Python (plus `pip install browser_cookie3`) is only needed if you use the

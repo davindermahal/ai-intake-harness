@@ -96,6 +96,32 @@ assert_contract_defined() {
     grep -q "nextPageToken=tok123" "$calls_log"
 }
 
+@test "jira_api: an empty response body (204 No Content) is treated as success, not a failure (regression: bug #10)" {
+    # PUT /issue/{key} and POST /issue/{key}/transitions — every jira.sh/jira-tags.sh
+    # state-changing write — return 204 No Content (empty body) from Jira on success. Before this
+    # fix, jira_api rejected an empty body as "non-JSON", so every successful transition was
+    # reported as a failure to its caller (tracker_transition returned 1 despite the write landing).
+    export JIRA_SITE_URL=https://fake.example
+    source "$REPO_ROOT/lib/tracker/jira-common.sh"
+    _JIRA_AUTH_MODE=token
+    _JIRA_AUTH_OPTS=(-u "fake:fake")
+    curl() { printf ''; }
+    run jira_api PUT "/rest/api/2/issue/PROJ-1" '{"update":{}}'
+    assert_success
+    assert_output ""
+}
+
+@test "jira_api: a genuinely non-JSON response (e.g. an HTML login page) still fails loudly" {
+    export JIRA_SITE_URL=https://fake.example
+    source "$REPO_ROOT/lib/tracker/jira-common.sh"
+    _JIRA_AUTH_MODE=token
+    _JIRA_AUTH_OPTS=(-u "fake:fake")
+    curl() { printf '<html><body>Login</body></html>'; }
+    run jira_api GET "/rest/api/2/issue/PROJ-1"
+    assert_failure
+    assert_output --partial "non-JSON response"
+}
+
 @test "jira-tags.sh: tracker_search scopes JQL to the app tag and assignee=currentUser()" {
     export TRACKER_PROJECT_KEY=PROJ TRACKER_APP_TAG="app:my-app"
     source "$REPO_ROOT/lib/tracker/jira-tags.sh"
@@ -105,4 +131,17 @@ assert_contract_defined() {
     [[ "$captured" == *'labels = "app:my-app"'* ]]
     [[ "$captured" == *'labels = "state:ready-for-implementation"'* ]]
     [[ "$captured" == *'assignee = currentUser()'* ]]
+}
+
+@test "jira-tags.sh: tracker_search_unassigned scopes JQL to the app tag, active states, and no assignee" {
+    export TRACKER_PROJECT_KEY=PROJ TRACKER_APP_TAG="app:my-app"
+    source "$REPO_ROOT/lib/tracker/jira-tags.sh"
+    local captured=""
+    jira_search_jql() { captured="$1"; }
+    tracker_search_unassigned
+    [[ "$captured" == *'labels = "app:my-app"'* ]]
+    [[ "$captured" == *'"state:ready-for-planning"'* ]]
+    [[ "$captured" == *'"state:in-progress"'* ]]
+    [[ "$captured" != *'"state:done"'* ]]
+    [[ "$captured" == *'assignee is EMPTY'* ]]
 }

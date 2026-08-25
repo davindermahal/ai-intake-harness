@@ -92,20 +92,26 @@ SOURCE_DB=$(wt_env_get "${REPO_ROOT}/.env" POSTGRES_DB)
 # Derive SLUG / DB_NAME / PROJECT_NAME / APP_CONTAINER / TICKET / WORKTREE_DIR
 project_derive_names "$BRANCH" "$REPO_ROOT"
 
-# Ports
-if [ -n "$PORT_ARG" ]; then
-    PORT="$PORT_ARG"
-else
-    PORT=$(wt_free_port 8082)
+# Ports — only meaningful for a project that has a container publishing them (wt_free_port itself
+# shells out to `docker ps` to avoid a collision, so skip it entirely for a no-container project;
+# see the APP_CONTAINER gate above project_derive_names sets).
+PORT=""
+XDEBUG_PORT=""
+if [ -n "$APP_CONTAINER" ]; then
+    if [ -n "$PORT_ARG" ]; then
+        PORT="$PORT_ARG"
+    else
+        PORT=$(wt_free_port 8082)
+    fi
+    XDEBUG_PORT=$(wt_free_port 9004)
 fi
-XDEBUG_PORT=$(wt_free_port 9004)
 
 echo "Branch:    ${BRANCH}"
 echo "Directory: ${WORKTREE_DIR}"
-echo "Port:      ${PORT}"
-echo "Xdebug:    ${XDEBUG_PORT}"
-echo "Database:  ${DB_NAME} (seed mode: ${SEED})"
-echo "Container: ${APP_CONTAINER}"
+echo "Port:      ${PORT:-(none)}"
+echo "Xdebug:    ${XDEBUG_PORT:-(none)}"
+echo "Database:  ${DB_NAME:-(none)} (seed mode: ${SEED})"
+echo "Container: ${APP_CONTAINER:-(none)}"
 echo "Ticket:    ${TICKET:-<none detected>}"
 echo ""
 
@@ -128,39 +134,47 @@ if [ "$RESUME" != "1" ]; then
     echo "==> Creating git worktree..."
     wt_create_worktree "$BRANCH" "$WORKTREE_DIR"
 
-    # 2. env files
-    echo "==> Writing .env / .env.local..."
-    wt_write_env "$REPO_ROOT" "$WORKTREE_DIR" "$PORT" "$XDEBUG_PORT" "$DB_NAME"
+    # 2-6b. env files + database + container — entirely opt-in. project_derive_names sets
+    # APP_CONTAINER; a project with nothing to containerize or persist (e.g. this repo's own
+    # ai-harness-dev adapter) sets it to "" and none of this runs — no .env/.env.local copy
+    # (there may be no repo-root .env at all for such a project), no docker, no psql. See
+    # lib/worktree-common.sh's header comment for the convention.
+    export USER_ID GROUP_ID APP_CONTAINER APP_PORT="$PORT" XDEBUG_PORT POSTGRES_DB="$DB_NAME"
+    if [ -n "$APP_CONTAINER" ]; then
+        echo "==> Writing .env / .env.local..."
+        wt_write_env "$REPO_ROOT" "$WORKTREE_DIR" "$PORT" "$XDEBUG_PORT" "$DB_NAME"
 
-    # 3. database — create empty before the container boots so Symfony can connect
-    echo "==> Creating database ${DB_NAME}..."
-    wt_create_empty_db "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$SOURCE_DB"
-    if [ "$SEED" = "clone" ]; then
-        echo "==> Cloning ${SOURCE_DB} → ${DB_NAME}..."
-        wt_clone_db "$SOURCE_DB" "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD"
+        # database — create empty before the container boots so the app can connect
+        echo "==> Creating database ${DB_NAME}..."
+        wt_create_empty_db "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$SOURCE_DB"
+        if [ "$SEED" = "clone" ]; then
+            echo "==> Cloning ${SOURCE_DB} → ${DB_NAME}..."
+            wt_clone_db "$SOURCE_DB" "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD"
+        fi
+
+        # bind-mount dirs
+        wt_precreate_dirs "$WORKTREE_DIR"
+
+        # start container (built from this project's own Dockerfile; mounts this worktree)
+        echo "==> Starting app container ${APP_CONTAINER}..."
+        COMPOSER_HOME="$(composer config --global home 2>/dev/null || echo "${HOME}/.composer")"
+        export COMPOSER_HOME
+        wt_start_container "$REPO_ROOT" "$WORKTREE_DIR" "$PROJECT_NAME"
+
+        # wait
+        echo "==> Waiting for ${APP_CONTAINER}..."
+        wt_wait_container "$APP_CONTAINER"
+        wt_fix_var_perms "$APP_CONTAINER"
+
+        # guard: abort before touching the DB if the container resolved to the wrong database
+        echo "==> Verifying container database..."
+        wt_verify_container_db "$APP_CONTAINER" "$USER_ID" "$GROUP_ID" "$DB_NAME" || exit 1
+    else
+        echo "==> No container for this project (APP_CONTAINER empty) — skipping database/container provisioning."
     fi
 
-    # 4. bind-mount dirs
-    wt_precreate_dirs "$WORKTREE_DIR"
-
-    # 5. start container (reuses the project image built by the project adapter; mounts this worktree)
-    echo "==> Starting app container ${APP_CONTAINER}..."
-    export USER_ID GROUP_ID APP_CONTAINER APP_PORT="$PORT" XDEBUG_PORT POSTGRES_DB="$DB_NAME"
-    COMPOSER_HOME="$(composer config --global home 2>/dev/null || echo "${HOME}/.composer")"
-    export COMPOSER_HOME
-    wt_start_container "$REPO_ROOT" "$WORKTREE_DIR" "$PROJECT_NAME"
-
-    # 6. wait
-    echo "==> Waiting for ${APP_CONTAINER}..."
-    wt_wait_container "$APP_CONTAINER"
-    wt_fix_var_perms "$APP_CONTAINER"
-
-    # 6b. guard: abort before touching the DB if the container resolved to the wrong database
-    echo "==> Verifying container database..."
-    wt_verify_container_db "$APP_CONTAINER" "$USER_ID" "$GROUP_ID" "$DB_NAME" || exit 1
-
-    # 7. PHP + JS deps + bundle assets
-    echo "==> Installing dependencies (composer, assets:install, npm)..."
+    # 7. dependencies (project's own call — may install directly on host when APP_CONTAINER is empty)
+    echo "==> Installing dependencies..."
     project_install_deps "$APP_CONTAINER" "$USER_ID" "$GROUP_ID" "$WORKTREE_DIR"
 
     # 8. schema + seed
@@ -173,20 +187,26 @@ if [ "$RESUME" != "1" ]; then
         project_migrate "$APP_CONTAINER" "$USER_ID" "$GROUP_ID"
     fi
 
-    # 9. one-time asset build (so the app renders without `make watch`)
-    echo "==> Building assets..."
+    # 9. one-time build (so the app/tooling is ready without a separate watch/build step)
+    echo "==> Building..."
     project_build "$WORKTREE_DIR"
 else
-    # RESUME: worktree, DB, and committed plan already exist. Skip create/seed/provision; just make
-    # sure the app container is running so the worker can build/verify against it. Recover the real
-    # port from the worktree's .env.local (the fresh wt_free_port picks above are unused on resume).
-    echo "==> RESUME: ensuring container ${APP_CONTAINER} is running..."
-    if docker ps -a --format '{{.Names}}' | grep -qx "${APP_CONTAINER}"; then
-        docker start "${APP_CONTAINER}" >/dev/null 2>&1 || true
-        wt_wait_container "$APP_CONTAINER"
-        wt_verify_container_db "$APP_CONTAINER" "$USER_ID" "$GROUP_ID" "$DB_NAME" || exit 1
+    # RESUME: worktree, DB (if any), and committed plan already exist. Skip create/seed/provision;
+    # just make sure the app container (if this project has one) is running so the worker can
+    # build/verify against it. Recover the real port from the worktree's .env.local (the fresh
+    # wt_free_port picks above are unused on resume).
+    export USER_ID GROUP_ID APP_CONTAINER
+    if [ -n "$APP_CONTAINER" ]; then
+        echo "==> RESUME: ensuring container ${APP_CONTAINER} is running..."
+        if docker ps -a --format '{{.Names}}' | grep -qx "${APP_CONTAINER}"; then
+            docker start "${APP_CONTAINER}" >/dev/null 2>&1 || true
+            wt_wait_container "$APP_CONTAINER"
+            wt_verify_container_db "$APP_CONTAINER" "$USER_ID" "$GROUP_ID" "$DB_NAME" || exit 1
+        else
+            echo "   WARNING: container ${APP_CONTAINER} not found — the worker's verify step may fail."
+        fi
     else
-        echo "   WARNING: container ${APP_CONTAINER} not found — the worker's verify step may fail."
+        echo "==> RESUME: no container for this project — nothing to restart."
     fi
     if [ -f "${WORKTREE_DIR}/.env.local" ]; then
         PORT="$(wt_env_get "${WORKTREE_DIR}/.env.local" APP_PORT)"
@@ -264,15 +284,17 @@ elif [ "$TERMINAL" != "0" ]; then
     fi
 fi
 
-BS_PORT=$((PORT + 1000))
 echo ""
 echo "================================================================"
 echo "  Worktree ready: ${BRANCH}"
-echo "  App:            http://localhost:${PORT}"
-echo "  BrowserSync:    http://localhost:${BS_PORT}  (run: make watch)"
-echo "  Xdebug port:    ${XDEBUG_PORT}"
-echo "  Database:       ${DB_NAME} (${SEED})"
-echo "  Container:      ${APP_CONTAINER}"
+if [ -n "$APP_CONTAINER" ]; then
+    BS_PORT=$((PORT + 1000))
+    echo "  App:            http://localhost:${PORT}"
+    echo "  BrowserSync:    http://localhost:${BS_PORT}  (run: make watch)"
+    echo "  Xdebug port:    ${XDEBUG_PORT}"
+fi
+echo "  Database:       ${DB_NAME:-(none)} (${SEED})"
+echo "  Container:      ${APP_CONTAINER:-(none)}"
 echo "  Ticket:         ${TICKET:-<none detected>}"
 echo "  Terminal:       ${LAUNCHED_MSG}"
 echo "================================================================"

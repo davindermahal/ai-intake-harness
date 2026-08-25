@@ -113,3 +113,29 @@ wt_dir() { printf '%s/%s%s' "$(dirname "$POLLER_REPO")" "$PLAN_WORKTREE_PREFIX" 
     run dispatch_planning "PROJ-1"
     [ "$(call_count tracker_add_comment)" -eq 1 ]
 }
+
+@test "warn_unassigned_pipeline_tickets: logs a warning per ticket when the adapter defines tracker_search_unassigned" {
+    tracker_search_unassigned() { printf 'PROJ-9\n'; }
+    run warn_unassigned_pipeline_tickets
+    assert_success
+    assert_output --partial "PROJ-9 is in the pipeline"
+    assert_output --partial "unassigned-pipeline check: 1 ticket(s) need an assignee"
+}
+
+@test "warn_unassigned_pipeline_tickets: silently a no-op when the adapter (e.g. jira.sh) doesn't define tracker_search_unassigned" {
+    unset -f tracker_search_unassigned 2>/dev/null
+    run warn_unassigned_pipeline_tickets
+    assert_success
+    refute_output --partial "unassigned"
+}
+
+@test "warn_unassigned_pipeline_tickets: succeeds (does not abort the poll) when zero unassigned tickets are found (regression: bug #11)" {
+    # The common case — most polls find nothing unassigned. `[ "$count" -gt 0 ] && log ...` as the
+    # function's LAST statement used to return the (failing) test's exit status here, which under
+    # `set -e` silently aborted the whole poll before it ever reached `log "poll complete"` — see
+    # intake-poll.sh's main block, which calls this as a bare statement.
+    tracker_search_unassigned() { :; }
+    run warn_unassigned_pipeline_tickets
+    assert_success
+    refute_output --partial "unassigned-pipeline check"
+}

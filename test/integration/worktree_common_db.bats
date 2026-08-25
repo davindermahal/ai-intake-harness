@@ -133,3 +133,27 @@ EOF
     assert_success
     assert_output "8084"
 }
+
+# ----- wt_start_container (plain-Dockerfile build+run, no docker-compose) ---------------------
+
+@test "wt_start_container: refuses cleanly when the repo has no Dockerfile" {
+    run wt_start_container "$BATS_TEST_TMPDIR/norepo" "$BATS_TEST_TMPDIR/wt" "myproj"
+    assert_failure
+    assert_output --partial "no Dockerfile"
+    [ ! -s "$STUB_LOG" ]   # docker never invoked
+}
+
+@test "wt_start_container: builds the repo's Dockerfile and runs it with the worktree bind-mounted" {
+    local repo="$BATS_TEST_TMPDIR/repo" wt="$BATS_TEST_TMPDIR/wt"
+    mkdir -p "$repo" "$wt"
+    echo "FROM ubuntu:24.04" > "$repo/Dockerfile"
+    touch "$repo/.env" "$wt/.env.local"
+    export APP_CONTAINER="myproj_feature1_app" APP_PORT=8090 XDEBUG_PORT=9004
+    run wt_start_container "$repo" "$wt" "myproj_feature1"
+    assert_success
+    grep -q "^docker build .*-t myproj_feature1:worktree .*-f ${repo}/Dockerfile ${repo}$" "$STUB_LOG"
+    grep -q "^docker run -d --name myproj_feature1_app " "$STUB_LOG"
+    grep -q -- "-v ${wt}:/workspace" "$STUB_LOG"
+    grep -q -- "-p 8090:8090" "$STUB_LOG"
+    grep -q -- "-p 9004:9004" "$STUB_LOG"
+}

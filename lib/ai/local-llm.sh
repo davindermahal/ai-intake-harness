@@ -132,6 +132,9 @@ _ai_local_llm_run_implementation_impl() {
     _ai_local_llm_run_with_env "$model" _ai_claude_run_implementation_impl "$@"
 }
 
+_ai_local_llm_display_name_impl() { printf '%s' 'Local LLM'; }
+
 ai_load_env()           { _ai_local_llm_load_env_impl "$@"; }
 ai_run_planning()       { _ai_local_llm_run_planning_impl "$@"; }
 ai_run_implementation() { _ai_local_llm_run_implementation_impl "$@"; }
+ai_display_name()       { _ai_local_llm_display_name_impl "$@"; }

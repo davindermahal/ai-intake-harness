@@ -128,6 +128,13 @@ jira_myself_display_name() {
 # of the tracker_* contract. Validates the response is JSON-shaped (not, e.g., an HTML login page —
 # Atlassian's actual failure mode for an expired session cookie, often returned as a plain HTTP
 # 200) so a stale/expired cookie fails loudly here instead of feeding garbage into a caller's jq.
+# An EMPTY body is treated as success, not a validation failure: Jira's issue-update PUT and
+# transitions POST endpoints — used by every jira.sh/jira-tags.sh state-changing write — return
+# `204 No Content` (empty body) by design on success. Without this, every successful write was
+# reported as a failure to its caller (regression: the write itself still landed, e.g. a Jira
+# label/status transition, but tracker_transition returned 1, so the poller logged "transition
+# FAILED — leaving for watchdog" and skipped its success-path bookkeeping, on every single
+# successful transition).
 jira_api() {
     local method="$1" path="$2" data="${3:-}" resp trimmed
     if [ -n "$data" ]; then
@@ -140,7 +147,7 @@ jira_api() {
     fi
     trimmed="${resp#"${resp%%[![:space:]]*}"}"
     case "${trimmed:0:1}" in
-        '{'|'[') ;;
+        '{'|'['|'') ;;
         *)
             echo "tracker/jira: non-JSON response from Jira (auth: ${_JIRA_AUTH_MODE:-unknown}) — likely an expired session cookie or auth failure" >&2
             return 1
@@ -203,22 +210,36 @@ jira_myself_account_id() {
     printf '%s' "$_JIRA_MYSELF_ACCOUNT_ID"
 }
 
-# The single AI-comment footer. Stamped on EVERY comment posted through jira_common_add_comment so
-# an AI-posted comment is distinguishable from a human one. Under the single-account model all
-# comments attribute to the same Jira user, so this footer is the only signal that Claude wrote it.
-# Because jira_common_add_comment is the ONE REST comment chokepoint shared by every Jira-flavored
+# Provider-independent portion of the AI-comment footer. Stamped on EVERY comment posted through
+# jira_common_add_comment so an AI-posted comment is distinguishable from a human one. Under the
+# single-account model all comments attribute to the same Jira user, so this footer is the only
+# such signal. Kept as its own constant (rather than folded directly into jira_common_ai_footer
+# below) because intake-poll.sh's watchdog (watchdog_stalled_comment_after) also reads this exact
+# variable as a fingerprint to detect ANY AI-posted comment regardless of which provider ran — the
+# full footer text now varies by provider (see jira_common_ai_footer), so it can no longer serve
+# as its own fingerprint the way the old static, hardcoded-"Claude" footer could.
+# Jira wiki markup: ---- = horizontal rule, _..._ = italic.
+JIRA_AI_COMMENT_FOOTER='(JIRA intake automation)_'
+
+# jira_common_ai_footer — echoes the full AI-comment footer, naming whichever provider actually ran
+# (lib/ai/<name>.sh's optional ai_display_name contract function — sourced by the time any comment
+# posts, see lib/intake-config.sh / dispatch_planning's load_ai_provider). Falls back to the
+# generic "AI" when no adapter is sourced (e.g. this file loaded standalone in a test). Because
+# jira_common_add_comment is the ONE REST comment chokepoint shared by every Jira-flavored
 # adapter's tracker_add_comment, keeping the footer here guarantees it can never be bypassed — the
 # worker prompts forbid posting comments any other way (e.g. via an Atlassian MCP tool).
-# Jira wiki markup: ---- = horizontal rule, _..._ = italic.
-JIRA_AI_COMMENT_FOOTER='----
-🤖 _Posted by Claude (JIRA intake automation)_'
+jira_common_ai_footer() {
+    local name="AI"
+    command -v ai_display_name >/dev/null 2>&1 && name="$(ai_display_name)"
+    printf -- '----\n🤖 _Posted by %s %s' "$name" "$JIRA_AI_COMMENT_FOOTER"
+}
 
 # jira_common_add_comment KEY TEXT — post a plain-text/wiki comment. Returns non-zero on a reported error.
 jira_common_add_comment() {
     local key="$1" text="$2" body resp
     text="$text
 
-$JIRA_AI_COMMENT_FOOTER"
+$(jira_common_ai_footer)"
     body="$(jq -n --arg b "$text" '{body:$b}')"
     resp="$(jira_api POST "/rest/api/2/issue/$key/comment" "$body")" || return 1
     if echo "$resp" | jq -e 'has("errorMessages") or has("errors")' >/dev/null 2>&1; then

@@ -80,6 +80,9 @@ _ai_claude_run_implementation_impl() {
         >"$logfile" 2>&1 & echo "$!" > "$pidfile" )
 }
 
+_ai_claude_display_name_impl() { printf '%s' 'Claude'; }
+
 ai_load_env()           { _ai_claude_load_env_impl "$@"; }
 ai_run_planning()       { _ai_claude_run_planning_impl "$@"; }
 ai_run_implementation() { _ai_claude_run_implementation_impl "$@"; }
+ai_display_name()       { _ai_claude_display_name_impl "$@"; }
