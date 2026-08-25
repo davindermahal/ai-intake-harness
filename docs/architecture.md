@@ -77,7 +77,8 @@ the plan and acts on the decision.
 ### 3. The implementation trigger + worker
 
 Implementation is triggered as plain automation: locate the ticket's feature branch (which carries
-the approved plan), provision a fully-isolated worktree — its own app container, its own port, and a
+the approved plan), provision a fully-isolated worktree — for a project that opts into one (see
+"The worktree lifecycle tooling" below), its own app container, its own port, and a
 **freshly-seeded database built from committed migrations** — flip the committed plan to an
 "approved/ready" state, and launch a **detached** headless implementation worker. That worker
 implements the approved plan, builds, runs tests, verifies against the running app, and posts its own
@@ -86,10 +87,14 @@ result summary back to the ticket. It stops at the automation boundary: no push,
 ### 4. The worktree lifecycle tooling
 
 A set of scripts and shared helpers manage the git-worktree lifecycle generically: create/reuse a
-worktree, allocate free host ports, write per-worktree environment overrides, create/clone/drop a
-per-worktree database (with guards so it can never drop the shared source database), start/stop the
-per-worktree app container, and — for attended use — open a terminal and launch the agent
-interactively. Everything stack-specific is delegated to the project adapter.
+worktree, and — for a project that opts into one — allocate free host ports, write per-worktree
+environment overrides, create/clone/drop a per-worktree database (with guards so it can never drop
+the shared source database), and build/start/stop a per-worktree app container from that project's
+own `Dockerfile`. Whether a project needs any of that at all is itself project-owned — the project
+adapter's `project_derive_names` opts a project in or out (see README.md step 4) — and everything
+else stack-specific (dependency install, schema/fixtures, build, test/verify) is delegated to the
+project adapter. For attended use, this tooling also opens a terminal and launches the agent
+interactively.
 
 ### 5. Helper CLIs for workers
 
@@ -156,9 +161,11 @@ detached worker coordinate without a shared service.
   feature branch.
 - **The AI coding agent (Claude Code CLI by default).** Invoked headless for planning and
   implementation.
-- **The consumer project's runtime (e.g. Docker + PostgreSQL).** Provisioned per worktree by the
-  project adapter. External container/database orchestration is stack-specific and lives entirely
-  behind the project-adapter seam.
+- **The consumer project's runtime (e.g. Docker + PostgreSQL), if it has one.** Opting in/out is
+  project-owned (`project_derive_names`, README.md step 4); when opted in, the harness's generic
+  worktree tooling builds/runs a single project-owned `Dockerfile` and provisions the database —
+  everything stack-specific beyond that (deps, schema/fixtures, build, test/verify) stays behind
+  the project-adapter seam. A project with nothing to containerize or persist touches none of it.
 - **An optional local-LLM path.** One provider adapter can redirect the agent's traffic through a
   local translation proxy to a locally-hosted model instead of a paid API. (See `design-decisions.md`;
   details are summarized, not exposed.)

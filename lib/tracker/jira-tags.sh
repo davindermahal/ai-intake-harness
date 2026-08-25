@@ -74,6 +74,17 @@ tracker_search() {
     jira_search_jql "project = ${TRACKER_PROJECT_KEY} AND labels = \"${TRACKER_APP_TAG}\" AND labels = \"state:${state}\" AND assignee = currentUser() ORDER BY created ASC"
 }
 
+# tracker_search_unassigned — echoes one ticket key per line: this repo's tickets
+# (TRACKER_APP_TAG) that carry an active pipeline state:* label but have no assignee. These are
+# invisible to every developer's tracker_search (assignee = currentUser() never matches an
+# unassigned ticket for anyone) — surfaced so a human notices and assigns them, rather than the
+# ticket silently never being picked up. Optional: not part of the required tracker_* contract:
+# only this adapter's shared-project, multi-assignee model has an "unassigned" concept worth
+# watching (jira.sh's single-account model doesn't).
+tracker_search_unassigned() {
+    jira_search_jql "project = ${TRACKER_PROJECT_KEY} AND labels = \"${TRACKER_APP_TAG}\" AND labels in (\"state:ready-for-planning\",\"state:needs-author-input\",\"state:plan-review\",\"state:ready-for-implementation\",\"state:in-progress\",\"state:ready-for-verification\") AND assignee is EMPTY ORDER BY created ASC"
+}
+
 # tracker_get_issue KEY — same fields as jira.sh plus `assignee`, needed for the per-write
 # assignee check below.
 tracker_get_issue() {

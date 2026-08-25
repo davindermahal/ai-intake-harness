@@ -33,20 +33,25 @@ SOURCE_DB=$(wt_env_get "${REPO_ROOT}/.env" POSTGRES_DB)
 # Derive SLUG / DB_NAME / PROJECT_NAME / APP_CONTAINER / TICKET / WORKTREE_DIR
 project_derive_names "$BRANCH" "$REPO_ROOT"
 
-# Ports
-if [ -n "$PORT_ARG" ]; then
-    PORT="$PORT_ARG"
-else
-    PORT=$(wt_free_port 8082)
+# Ports — only meaningful for a project that has a container publishing them (wt_free_port shells
+# out to `docker ps` to avoid a collision, so skip it entirely for a no-container project).
+PORT=""
+XDEBUG_PORT=""
+if [ -n "$APP_CONTAINER" ]; then
+    if [ -n "$PORT_ARG" ]; then
+        PORT="$PORT_ARG"
+    else
+        PORT=$(wt_free_port 8082)
+    fi
+    XDEBUG_PORT=$(wt_free_port 9004)
 fi
-XDEBUG_PORT=$(wt_free_port 9004)
 
 echo "Branch:    ${BRANCH}"
 echo "Directory: ${WORKTREE_DIR}"
-echo "Port:      ${PORT}"
-echo "Xdebug:    ${XDEBUG_PORT}"
-echo "Database:  ${DB_NAME} (cloned from ${SOURCE_DB})"
-echo "Container: ${APP_CONTAINER}"
+echo "Port:      ${PORT:-(none)}"
+echo "Xdebug:    ${XDEBUG_PORT:-(none)}"
+echo "Database:  ${DB_NAME:-(none)} (cloned from ${SOURCE_DB})"
+echo "Container: ${APP_CONTAINER:-(none)}"
 echo ""
 
 if [ -d "${WORKTREE_DIR}" ]; then
@@ -58,51 +63,56 @@ fi
 echo "==> Creating git worktree..."
 wt_create_worktree "$BRANCH" "$WORKTREE_DIR"
 
-# 2. env files
-echo "==> Writing .env / .env.local..."
-wt_write_env "$REPO_ROOT" "$WORKTREE_DIR" "$PORT" "$XDEBUG_PORT" "$DB_NAME"
-
-# 3. clone the main database
-echo "==> Cloning database ${SOURCE_DB} → ${DB_NAME}..."
-wt_create_empty_db "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$SOURCE_DB"
-wt_clone_db "$SOURCE_DB" "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD"
-echo "Database ready."
-
-# 4. bind-mount dirs
-wt_precreate_dirs "$WORKTREE_DIR"
-
-# 5. start container
-echo "==> Starting app container..."
+# 2-6b. env files + database + container — entirely opt-in (APP_CONTAINER=="" opts out, see
+# lib/worktree-common.sh's header comment). Same gate as worktree-go.sh — no .env/.env.local copy
+# either (there may be no repo-root .env at all for a no-container project).
 export USER_ID GROUP_ID APP_CONTAINER APP_PORT="$PORT" XDEBUG_PORT POSTGRES_DB="$DB_NAME"
-COMPOSER_HOME="$(composer config --global home 2>/dev/null || echo "${HOME}/.composer")"
-export COMPOSER_HOME
-wt_start_container "$REPO_ROOT" "$WORKTREE_DIR" "$PROJECT_NAME"
+if [ -n "$APP_CONTAINER" ]; then
+    echo "==> Writing .env / .env.local..."
+    wt_write_env "$REPO_ROOT" "$WORKTREE_DIR" "$PORT" "$XDEBUG_PORT" "$DB_NAME"
 
-# 6. wait
-echo "==> Waiting for ${APP_CONTAINER}..."
-wt_wait_container "$APP_CONTAINER"
+    echo "==> Cloning database ${SOURCE_DB} → ${DB_NAME}..."
+    wt_create_empty_db "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$SOURCE_DB"
+    wt_clone_db "$SOURCE_DB" "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD"
+    echo "Database ready."
 
-# 6b. guard: abort before touching the DB if the container resolved to the wrong database
-echo "==> Verifying container database..."
-wt_verify_container_db "$APP_CONTAINER" "$USER_ID" "$GROUP_ID" "$DB_NAME" || exit 1
+    wt_precreate_dirs "$WORKTREE_DIR"
+
+    echo "==> Starting app container..."
+    COMPOSER_HOME="$(composer config --global home 2>/dev/null || echo "${HOME}/.composer")"
+    export COMPOSER_HOME
+    wt_start_container "$REPO_ROOT" "$WORKTREE_DIR" "$PROJECT_NAME"
+
+    echo "==> Waiting for ${APP_CONTAINER}..."
+    wt_wait_container "$APP_CONTAINER"
+
+    echo "==> Verifying container database..."
+    wt_verify_container_db "$APP_CONTAINER" "$USER_ID" "$GROUP_ID" "$DB_NAME" || exit 1
+else
+    echo "==> No container for this project (APP_CONTAINER empty) — skipping database/container provisioning."
+fi
 
 # 7. deps + migrations
-echo "==> Installing dependencies (composer, assets:install, npm)..."
+echo "==> Installing dependencies..."
 project_install_deps "$APP_CONTAINER" "$USER_ID" "$GROUP_ID" "$WORKTREE_DIR"
 echo "==> Running migrations..."
 project_migrate "$APP_CONTAINER" "$USER_ID" "$GROUP_ID"
 
-BS_PORT=$((PORT + 1000))
 echo ""
 echo "================================================================"
 echo "  Worktree ready: ${BRANCH}"
-echo "  App:            http://localhost:${PORT}"
-echo "  BrowserSync:    http://localhost:${BS_PORT}  (auto-reload)"
-echo "  Xdebug port:    ${XDEBUG_PORT}"
-echo "  Database:       ${DB_NAME}"
-echo "  Container:      ${APP_CONTAINER}"
+if [ -n "$APP_CONTAINER" ]; then
+    BS_PORT=$((PORT + 1000))
+    echo "  App:            http://localhost:${PORT}"
+    echo "  BrowserSync:    http://localhost:${BS_PORT}  (auto-reload)"
+    echo "  Xdebug port:    ${XDEBUG_PORT}"
+fi
+echo "  Database:       ${DB_NAME:-(none)}"
+echo "  Container:      ${APP_CONTAINER:-(none)}"
 echo ""
 echo "  Next:"
 echo "    cd ${WORKTREE_DIR}"
-echo "    make watch   # webpack + BrowserSync on :${BS_PORT}"
+if [ -n "$APP_CONTAINER" ]; then
+    echo "    make watch   # webpack + BrowserSync on :${BS_PORT}"
+fi
 echo "================================================================"

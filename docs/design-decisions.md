@@ -158,6 +158,16 @@ another environment's data.
 omits environment-specific assets (e.g. uploaded images). In exchange, isolation is clean and
 migrations are exercised every time.
 
+**Update: container/database are opt-in per project, not mandatory.** The container/DB
+orchestration in `lib/worktree-common.sh` was originally written against one Docker+Postgres
+consumer and unconditionally assumed every project has both. That's now decided by the project
+adapter's `project_derive_names` (see README.md step 4): `APP_CONTAINER=""` opts a project out
+entirely — worktree-go.sh/worktree-new.sh skip every docker/psql/`.env` step for it, so a plain
+script/tooling repo (this harness's own self-hosted use, `scripts/lib/project/ai-harness-dev.sh`)
+never touches Docker or a database at all. A project that does opt in gets a single project-owned
+`Dockerfile` built and run — not docker-compose, which the original version hardcoded — since a
+generic core has no business assuming a project needs more than one container.
+
 ---
 
 ## 7. File-based coordination in a gitignored runtime state directory

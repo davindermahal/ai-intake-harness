@@ -20,7 +20,7 @@
 # search, read, comment, transition — through the configured tracker adapter (Jira today,
 # ai-intake-harness/lib/tracker/jira.sh, full-REST with a personal API token). The AI runs never
 # talk to the tracker directly. This removes the interactive OAuth (MCP) dependency so the
-# workflow runs unattended. See .ai/docs/jira-intake-setup.md (Part A2) and .ai/docs/JIRA-WORKFLOW.md.
+# workflow runs unattended. See README.md "Set up Jira credentials" and docs/workflow-and-triggers.md.
 #
 # Tracker + project + AI selection comes from .ai/intake.config (TRACKER, TRACKER_PROJECT_KEY,
 # PROJECT_ADAPTER, PROJECT_DB_PREFIX, AI_PROVIDER, AI_PROFILE_*, ...), loaded via
@@ -535,7 +535,7 @@ $(cat "$plan_path")
             # blow past it (the request is then rejected outright — nothing posts, not even a
             # truncated version). Prefer linking to the file over truncating mid-plan, which would
             # both mangle the markdown and leave an unclosed {code} block. 32000 leaves headroom
-            # for the summary text above plus JIRA_AI_COMMENT_FOOTER added by tracker_add_comment.
+            # for the summary text above plus the AI-comment footer added by tracker_add_comment.
             if [ $(( ${#comment} + ${#inline_block} )) -lt 32000 ]; then
                 comment="$comment$inline_block"
             else
@@ -668,7 +668,10 @@ dispatch_implementation() {
 # comment created after LAUNCHED_EPOCH (case C: the worker finished and deliberately left the
 # ticket In Progress with a blocker/failure report — restarting would likely just repeat it).
 # Reuses jira.sh's own JIRA_AI_COMMENT_FOOTER (sourced into this process by intake-config.sh) as
-# the fingerprint rather than adding a new tracker_* contract function for one adapter.
+# the fingerprint rather than adding a new tracker_* contract function for one adapter. That
+# variable now holds only the provider-independent constant portion of the footer (the full text
+# varies by which AI provider ran — see jira-common.sh's jira_common_ai_footer), so this fingerprint
+# still matches an AI-posted comment regardless of provider.
 watchdog_stalled_comment_after() {
     # Two `local`s: $key must be assigned before it can expand in $ctx (SC2318 — in a single
     # `local`, the expansion would see the CALLER's key, which only works here by accident).
@@ -795,6 +798,28 @@ process_watchdog() {
     log "watchdog: $count ticket(s) checked"
 }
 
+# warn_unassigned_pipeline_tickets — optional adapter capability: if the loaded tracker adapter
+# defines tracker_search_unassigned (only lib/tracker/jira-tags.sh does), log one warning line
+# per ticket it reports. Log-only by design (no ticket comment) — see the plan's Key decisions
+# for why. Silently a no-op for adapters (e.g. jira.sh) that don't define the function.
+warn_unassigned_pipeline_tickets() {
+    declare -F tracker_search_unassigned >/dev/null 2>&1 || return 0
+    local key count=0
+    while IFS= read -r key; do
+        [ -n "$key" ] || continue
+        count=$((count+1))
+        log "  warning: $key is in the pipeline under this repo's app tag but has no assignee — no harness install will pick it up until it's assigned"
+    done < <(tracker_search_unassigned)
+    # `[ cond ] && cmd` as the LAST statement of a function returns the test's own (failing) exit
+    # status whenever cond is false — count=0 (the normal case, no unassigned tickets) made this
+    # function return 1 on almost every run. Called as a bare statement under `set -e` in main
+    # below, that silently aborted the whole script before `log "poll complete"` — see
+    # .intake/poll.log: every cycle since this shipped is missing that line (regression: bug #11).
+    if [ "$count" -gt 0 ]; then
+        log "unassigned-pipeline check: $count ticket(s) need an assignee"
+    fi
+}
+
 process_queue() {
     local label="$1" queue="$2" handler="$3" gated="${4:-0}" key count=0 live
     log "polling $label queue"
@@ -832,6 +857,8 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
             ;;
         *) die "invalid POLL_MODE: $POLL_MODE (planning|implementation|watchdog|both)" ;;
     esac
+
+    warn_unassigned_pipeline_tickets
 
     log "poll complete"
 fi

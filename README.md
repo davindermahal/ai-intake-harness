@@ -167,9 +167,23 @@ Create `scripts/lib/project/my-stack.sh`. It must export these functions:
 **`project_derive_names <branch> <repo-root>`**
 Sets: `SLUG`, `DB_SUFFIX`, `DB_NAME`, `PROJECT_NAME`, `APP_CONTAINER`, `TICKET`, `WORKTREE_DIR`
 
+**Containers/databases are entirely opt-in, decided by this function.** Set `APP_CONTAINER=""`
+(empty) if your project has nothing to containerize or persist — worktree-go.sh/worktree-new.sh
+gate every docker/psql/`.env` step on whether `APP_CONTAINER` is non-empty, so a plain
+script/tooling repo never touches any of it. (This harness's own self-hosted adapter,
+`scripts/lib/project/ai-harness-dev.sh` — gitignored, host-local, so you won't see it in a fresh
+checkout — does exactly this; its header comment walks through the full no-container example.) If
+you DO set `APP_CONTAINER`, the harness builds and runs a single project-owned `Dockerfile` at
+your repo root (`docker build` + `docker run`, bind-mounting the worktree at `/workspace`) —
+deliberately not docker-compose; a project needing more than one container handles that from
+inside its own image or via the `project_*` hooks below, not something this generic core
+orchestrates.
+
 **`project_install_deps <container> <uid> <gid> <worktree-dir>`**
 Install your project's dependencies (npm install, composer install, etc.) inside the running
-container, as the given uid/gid so bind-mounted files stay owned by the host user.
+container, as the given uid/gid so bind-mounted files stay owned by the host user. `<container>`
+is `""` when `APP_CONTAINER` is empty — install directly on the host instead, or no-op if there's
+nothing to install.
 
 **`project_provision_fresh <container> <uid> <gid> <repo-root> <db-name> <pg-user> <pg-password>`**
 Create a fresh database schema + fixtures. Called once when a new worktree is provisioned with
@@ -198,6 +212,15 @@ if OK.
 Echo the path to a `.claude/settings.*.json` file (permission allowlist for unattended workers).
 Example: `.claude/settings.my-stack.json`.
 
+**`project_post_worktree_create <worktree-dir>`** (optional)
+Not part of the required contract — `wt_create_worktree` calls it only if your adapter defines it,
+right after a fresh worktree is provisioned (a no-op for every other adapter). Use it if your
+project keeps its own gitignored, per-project config that a plain `git worktree add` (tracked files
+only) won't carry into a new worktree — copy it in here from `$REPO_ROOT` (set by the caller). This
+harness's own self-hosted adapter (`scripts/lib/project/ai-harness-dev.sh`) is the reference
+example: it copies `.ai/intake.config`, `.ai/prompts/`, and `scripts/` in, since without them a
+headless worker can't find its own bootstrap prompt or post back to the ticket.
+
 For a worked example of a Symfony/Docker project adapter implementing this contract, see `scripts/lib/project/symfony-docker.sh` in the harness's original consumer project (private, not yet public).
 
 ### 5. Wire up the Makefile
@@ -221,6 +244,9 @@ worktree-remove:
 intake-poll-log:
 	@tail -n $(or $(LINES),200) .intake/poll.log
 
+intake-status:
+	@bash ai-intake-harness/intake-status.sh $(if $(MODE),--mode $(MODE))
+
 intake-plan:
 	@test -n "$(KEY)" || (echo "Usage: make intake-plan KEY=<TICKET-NN>" && exit 1)
 	@f=$$(ls .ai/plans/active/$(KEY)-*.md .ai/plans/completed/$(KEY)-*.md 2>/dev/null | head -1); \
@@ -228,9 +254,12 @@ intake-plan:
 ```
 
 > The poller itself takes only `--mode planning|implementation|watchdog|both` and `--dry-run` —
-> status/log helpers are consumer-side Makefile recipes over the `.intake/` state dir; the
-> `intake-*` targets above are a minimal set, worth extending with your own dashboard/status
-> script over the same `.intake/` files as your usage grows.
+> status/log helpers are consumer-side Makefile recipes over the `.intake/` state dir.
+> `ai-intake-harness/intake-status.sh` (wired up as `intake-status` above) reports the tracker's
+> queued/in-progress tickets cross-referenced with local runtime state (running workers, in-flight
+> markers, watchdog attempts) — `make intake-status` for everything, or `MODE=in-progress` /
+> `planning` / `implementation` to filter. It only reads (never writes) the tracker and `.intake/`,
+> so it's safe to run anytime.
 
 ### 6. Set up the cron poller
 
@@ -416,6 +445,10 @@ Implement these shell functions:
   planning routine headlessly inside the given worktree.
 - **`ai_run_implementation <logfile> <pidfile>`** — launch a DETACHED headless implementation
   worker, writing its PID to `<pidfile>`.
+- **`ai_display_name`** *(optional)* — echoes a short human-readable name for this provider
+  (e.g. `Claude`, `Gemini`). Used only to name the AI in the footer `tracker_add_comment`
+  stamps on every posted comment (`lib/tracker/jira-common.sh`); an adapter that omits it falls
+  back to the generic `AI`.
 
 **Built-in adapters:** `lib/ai/claude.sh` (Claude Code CLI, default, fully working — both
 phases; automation boundary via a curated per-command allow/deny `--settings` profile, see

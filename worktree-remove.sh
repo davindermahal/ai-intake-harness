@@ -191,8 +191,8 @@ remove_branch() {
     if [ "$DRY_RUN" = "1" ]; then
         log "[dry-run] would remove '$branch':"
         log "    worktree : ${WORKTREE_DIR}"
-        log "    container: ${APP_CONTAINER}  (network ${PROJECT_NAME}_default)"
-        [ "$KEEP_DB" = "1" ]     && log "    database : (kept)" || log "    database : ${DB_NAME}"
+        log "    container: ${APP_CONTAINER:-(none)}  (network ${PROJECT_NAME}_default)"
+        [ "$KEEP_DB" = "1" ]     && log "    database : (kept)" || log "    database : ${DB_NAME:-(none)}"
         [ "$KEEP_BRANCH" = "1" ] && log "    branch   : (kept)" || log "    branch   : delete ${branch}"
         return 0
     fi
@@ -210,8 +210,12 @@ remove_branch() {
     fi
     git -C "$REPO_ROOT" worktree prune > /dev/null 2>&1 || true
 
-    # 2. container + network
-    if wt_remove_container "$APP_CONTAINER" "$PROJECT_NAME"; then
+    # 2. container + network — nothing to do for a project with no container (APP_CONTAINER=="",
+    # see lib/worktree-common.sh's header comment); skip instead of calling wt_remove_container
+    # with an empty name, which would just report "not found" anyway.
+    if [ -z "$APP_CONTAINER" ]; then
+        container_note="container: none for this project"
+    elif wt_remove_container "$APP_CONTAINER" "$PROJECT_NAME"; then
         container_note="container: removed"
         any_found=1
     else
@@ -219,8 +223,11 @@ remove_branch() {
     fi
 
     # 3. database (guarded) — also the companion "<db>_test" database Doctrine's test env
-    # creates (make test-ci), which otherwise outlives the worktree as an orphan.
-    if [ "$KEEP_DB" = "1" ]; then
+    # creates (make test-ci), which otherwise outlives the worktree as an orphan. Skipped
+    # entirely for a project with no database (DB_NAME=="").
+    if [ -z "$DB_NAME" ]; then
+        db_note="database: none for this project"
+    elif [ "$KEEP_DB" = "1" ]; then
         db_note="database: kept"
     elif wt_drop_db "$DB_NAME" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$SOURCE_DB"; then
         db_note="database: dropped"

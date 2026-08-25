@@ -10,6 +10,14 @@
 # dependency install, schema/fixture provisioning, asset build, tests, and smoke-verify are the
 # `project_*` contract, implemented per target project in scripts/lib/project/<adapter>.sh
 # (e.g., symfony-docker.sh for a Symfony project). Callers source both this file and the configured project adapter.
+#
+# Containers/databases are OPTIONAL, per project: project_derive_names (the adapter's own function)
+# sets APP_CONTAINER — a non-empty value opts into a container (built from a single project-owned
+# Dockerfile at the main worktree's repo root, see wt_start_container below; no docker-compose, no
+# multi-service orchestration), an empty value ("") opts out entirely. worktree-go.sh/
+# worktree-new.sh gate every container/DB step on whether APP_CONTAINER is set, so a project with
+# nothing to containerize or persist (e.g. a plain script/tooling repo) never touches docker/psql
+# at all — see scripts/lib/project/ai-harness-dev.sh for a real "no container" adapter.
 
 # Guard against double-sourcing
 [ -n "${_WORKTREE_COMMON_LOADED:-}" ] && return 0
@@ -18,6 +26,7 @@ _WORKTREE_COMMON_LOADED=1
 # Read a KEY=value from a .env-style file without sourcing it (values may contain
 # bash-unsafe characters). Usage: wt_env_get <file> <KEY>
 wt_env_get() {
+    [ -f "$1" ] || return 0   # no .env at all (e.g. a project with no container/DB) — just empty
     grep -E "^${2}=" "$1" | head -1 | cut -d'=' -f2-
 }
 
@@ -32,6 +41,15 @@ wt_free_port() {
 }
 
 # Create the git worktree: check out an existing branch, or create a new one from HEAD.
+# `git worktree add` only checks out tracked files — submodules (e.g. test/bats-core) aren't part
+# of that checkout, so `make test` silently has no bats-core to run against in a fresh worktree
+# until submodules are initialized here. A no-op if the repo has no .gitmodules.
+#
+# project_post_worktree_create <worktree-dir> — OPTIONAL project_* contract hook, called once here
+# right after provisioning if the adapter defines it (no-op otherwise). For a project whose own
+# gitignored per-project config (e.g. this harness's own self-hosted dogfood setup — see
+# scripts/lib/project/ai-harness-dev.sh) never makes it into a fresh worktree via the plain git
+# checkout, this is where an adapter copies that in from $REPO_ROOT (set by the caller).
 # Usage: wt_create_worktree <branch> <worktree-dir>
 wt_create_worktree() {
     local branch="$1" dir="$2"
@@ -39,6 +57,10 @@ wt_create_worktree() {
         git worktree add "$dir" "$branch"
     else
         git worktree add -b "$branch" "$dir"
+    fi
+    git -C "$dir" submodule update --init --recursive
+    if declare -f project_post_worktree_create >/dev/null 2>&1; then
+        project_post_worktree_create "$dir"
     fi
 }
 
@@ -91,19 +113,34 @@ wt_clone_db() {
     return 0
 }
 
-# Start the worktree's app container using the MAIN worktree's compose files
-# (always current) but resolving relative volume paths from the worktree dir.
+# Start the worktree's app container by building the MAIN worktree's Dockerfile (deliberately a
+# single, project-owned file — no docker-compose, no multi-service orchestration; a project that
+# needs more than one container is outside this generic core's scope, and can do that from inside
+# its own image or via project_* hooks instead) and running it with this worktree bind-mounted at
+# /workspace. Only reached when the project adapter's project_derive_names set a non-empty
+# APP_CONTAINER — APP_CONTAINER="" means the project opts out of containers entirely, and
+# worktree-go.sh/worktree-new.sh skip this whole step (see the APP_CONTAINER gate in each).
+# Reads APP_CONTAINER/APP_PORT/XDEBUG_PORT from the environment (exported by the caller, same
+# convention the rest of this provisioning already uses) and app env vars from the worktree's
+# .env + .env.local (written by wt_write_env).
 # Usage: wt_start_container <repo-root> <worktree-dir> <project-name>
 wt_start_container() {
     local repo_root="$1" dir="$2" project="$3"
-    docker compose \
+    local dockerfile="${repo_root}/Dockerfile"
+    if [ ! -f "$dockerfile" ]; then
+        echo "wt_start_container: no Dockerfile at ${dockerfile} — a project adapter that sets APP_CONTAINER must provide one" >&2
+        return 1
+    fi
+    docker build -q -t "${project}:worktree" -f "$dockerfile" "$repo_root" > /dev/null
+    docker run -d --name "${APP_CONTAINER}" \
         --env-file "${repo_root}/.env" \
         --env-file "${dir}/.env.local" \
-        -f "${repo_root}/compose.yaml" \
-        -f "${repo_root}/compose.override.yaml" \
-        --project-directory "${dir}" \
-        -p "${project}" \
-        up -d
+        -p "${APP_PORT}:${APP_PORT}" \
+        -p "${XDEBUG_PORT}:${XDEBUG_PORT}" \
+        -v "${dir}:/workspace" \
+        -w /workspace \
+        "${project}:worktree" \
+        tail -f /dev/null > /dev/null
 }
 
 # Wait up to 30s for the container to accept exec. Usage: wt_wait_container <container>

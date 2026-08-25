@@ -22,6 +22,11 @@ POSTGRES_USER=appuser
 POSTGRES_PASSWORD=secret
 POSTGRES_DB=myapp_main
 EOF
+    # fake-stack below sets a non-empty APP_CONTAINER (opts into a container), so
+    # wt_start_container needs a Dockerfile to build from — docker itself is stubbed below.
+    cat > "$CONSUMER/Dockerfile" <<'EOF'
+FROM ubuntu:24.04
+EOF
     mkdir -p "$CONSUMER/.ai" "$CONSUMER/scripts/lib/project"
     cat > "$CONSUMER/.ai/intake.config" <<'EOF'
 TRACKER=jira
@@ -46,21 +51,25 @@ project_build() { :; }
 PROJEOF
 
     STUB_BIN="$BATS_TEST_TMPDIR/stubbin"
+    STUB_LOG="$BATS_TEST_TMPDIR/calls.log"
     mkdir -p "$STUB_BIN"
+    : > "$STUB_LOG"
     for bin in psql pg_dump pg_restore composer; do
-        cat > "$STUB_BIN/$bin" <<'EOF'
+        cat > "$STUB_BIN/$bin" <<EOF
 #!/bin/bash
+printf '$bin %s\n' "\$*" >> "$STUB_LOG"
 exit 0
 EOF
         chmod +x "$STUB_BIN/$bin"
     done
-    cat > "$STUB_BIN/docker" <<'EOF'
+    cat > "$STUB_BIN/docker" <<EOF
 #!/bin/bash
-case "$*" in *"printenv POSTGRES_DB"*) printf '%s' "${EXPECTED_POSTGRES_DB:-}" ;; esac
+printf 'docker %s\n' "\$*" >> "$STUB_LOG"
+case "\$*" in *"printenv POSTGRES_DB"*) printf '%s' "\${EXPECTED_POSTGRES_DB:-}" ;; esac
 exit 0
 EOF
     chmod +x "$STUB_BIN/docker"
-    export PATH="$STUB_BIN:$PATH"
+    export STUB_LOG PATH="$STUB_BIN:$PATH"
 }
 
 @test "worktree-go.sh HEADLESS: an AI provider that fails its env check aborts cleanly with no running-slot PID file" {
@@ -71,4 +80,28 @@ EOF
     assert_output --partial "failed its environment check"
     assert_output --partial "Not launching"
     [ ! -f "$CONSUMER/.intake/running/PROJ-9-headless.pid" ]
+}
+
+@test "worktree-go.sh HEADLESS: a project adapter with APP_CONTAINER=\"\" never touches docker/psql (regression: worktree-go.sh core no longer assumes every project has a container/DB)" {
+    # Same fixture, but the adapter opts out of a container entirely — the real convention
+    # scripts/lib/project/ai-harness-dev.sh uses for this repo's own self-hosted use.
+    cat > "$CONSUMER/scripts/lib/project/fake-stack.sh" <<'PROJEOF'
+project_derive_names() {
+    local branch="$1" repo_root="$2"
+    local slug; slug="$(printf '%s' "$branch" | tr '[:upper:]/' '[:lower:]-')"
+    SLUG="$slug"; DB_SUFFIX=""; DB_NAME=""; PROJECT_NAME=""; APP_CONTAINER=""
+    TICKET="$(printf '%s' "$branch" | grep -oE 'PROJ-[0-9]+' | head -1)"
+    WORKTREE_DIR="$(dirname "$repo_root")/wt-${slug}"
+}
+project_install_deps() { :; }
+project_provision_fresh() { :; }
+project_migrate() { :; }
+project_build() { :; }
+PROJEOF
+    local branch="feature/PROJ-9-nocontainer"
+    run bash -c "cd '$CONSUMER' && HEADLESS=1 PROVIDER=local-llm TERMINAL=0 bash '$REPO_ROOT/worktree-go.sh' '$branch' 8096"
+    assert_failure   # still fails at the (unrelated) AI env check, same as the container-ful test
+    assert_output --partial "No container for this project"
+    assert_output --partial "failed its environment check"
+    [ ! -s "$STUB_LOG" ]   # docker/psql/pg_dump/pg_restore/composer: NEVER invoked
 }

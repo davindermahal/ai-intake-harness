@@ -25,7 +25,8 @@ report back**, driven by a background **poller** (`intake-poll.sh`) fired from c
   `project_provision_fresh`, `project_build`, `project_test`, `project_verify`,
   `project_permission_profile`.
 - **AI provider adapter** (`lib/ai/<name>.sh`) — one per AI backend. Contract: `ai_load_env`,
-  `ai_run_planning`, `ai_run_implementation`. Built-in: `claude.sh` (fully working, default),
+  `ai_run_planning`, `ai_run_implementation`, `ai_display_name` (optional). Built-in: `claude.sh`
+  (fully working, default),
   `gemini.sh` (fully working, both phases), `codex.sh` (fully working, both phases; fixed
   `-s workspace-write -a never` automation boundary, persisted-login auth, not an env var),
   `antigravity.sh` (Google's Antigravity CLI, binary `agy`; fixed `--sandbox
